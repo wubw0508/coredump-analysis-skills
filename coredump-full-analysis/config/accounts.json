@@ -47,8 +47,8 @@
         "sudo_password": "在此处输入当前登录账户密码"
     },
     "paths": {
-        "workspace": "/home/wubw/workspace",
-        "code_dir": "/home/wubw/workspace/3.代码管理",
-        "download_dir": "/home/wubw/workspace/4.包管理/下载包/downloads"
+        "workspace": "~/coredump-workspace",
+        "code_dir": "~/coredump-workspace/3.代码管理",
+        "download_dir": "~/coredump-workspace/4.包管理/下载包/downloads"
     }
 }
