@@ -14,7 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Skills目录
-SKILLS_DIR="/home/wubw/skills"
+SKILLS_DIR="/home/ut000168@uos/code/coredump-analysis-skills"
 
 # 脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,6 +35,242 @@ END_DATE="${END_DATE:-}"
 SYS_VERSION="${SYS_VERSION:-1070-1075}"
 WORKSPACE="${WORKSPACE:-./workspace}"
 
+# 支持通过环境变量传入账号配置（优先级最高）
+SHUTTLE_USERNAME="${SHUTTLE_USERNAME:-}"
+SHUTTLE_PASSWORD="${SHUTTLE_PASSWORD:-}"
+GERRIT_USERNAME="${GERRIT_USERNAME:-}"
+GERRIT_PASSWORD="${GERRIT_PASSWORD:-}"
+
+# 检查配置完整性
+check_config() {
+    echo -e "${BLUE}检查配置完整性...${NC}"
+
+    local setup_script="$SCRIPT_DIR/setup_accounts.py"
+
+    # 方法1: 检查是否通过环境变量传入了账号
+    if [[ -n "$SHUTTLE_USERNAME" && -n "$SHUTTLE_PASSWORD" && -n "$GERRIT_USERNAME" && -n "$GERRIT_PASSWORD" ]]; then
+        echo -e "${GREEN}✅ 检测到环境变量传入的账号配置${NC}"
+        write_config_from_env
+        return 0
+    fi
+
+    # 方法2: 使用 Python 脚本检查配置
+    if ! python3 "$setup_script" --check 2>/dev/null; then
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${YELLOW}检测到缺少必要配置，请编辑配置文件输入账号信息${NC}"
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+
+        # 生成配置模板文件
+        generate_config_template
+
+        # 提示用户编辑
+        prompt_edit_config
+
+        # 重新检查配置
+        if ! python3 "$setup_script" --check 2>/dev/null; then
+            echo -e "${RED}配置仍然不完整，请确保填写了所有账号信息${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}✅ 配置检查通过${NC}"
+    fi
+}
+
+# 生成配置模板文件
+generate_config_template() {
+    local config_file="$CONFIG_DIR/accounts.json"
+
+    if [[ ! -f "$config_file" ]]; then
+        cat > "$config_file" << 'EOF'
+{
+    "shuttle": {
+        "name": "Shuttle UnionTech",
+        "description": "用于从 shuttle.uniontech.com 下载 deb 包",
+        "url": "https://shuttle.uniontech.com",
+        "api_url": "https://shuttle.uniontech.com/api/download",
+        "account": {
+            "username": "请在此输入Shuttle用户名",
+            "password": "请在此输入Shuttle密码"
+        }
+    },
+    "metabase": {
+        "name": "Metabase",
+        "description": "用于下载崩溃数据",
+        "url": "https://metabase.cicd.getdeepin.org",
+        "api_session": "/api/session",
+        "api_dataset": "/api/dataset",
+        "account": {
+            "username": "app@deepin.org",
+            "password": "deepin123"
+        },
+        "database": {
+            "id": 10,
+            "source_table_id": 196
+        }
+    },
+    "gerrit": {
+        "name": "Gerrit",
+        "description": "用于下载和管理代码仓库",
+        "host": "gerrit.uniontech.com",
+        "port": "29418",
+        "account": {
+            "username": "请在此输入Gerrit用户名",
+            "password": "请在此输入Gerrit密码"
+        },
+        "ssh_key": "~/.ssh/id_rsa"
+    },
+    "internal_server": {
+        "name": "内部构建服务器",
+        "description": "用于从内部构建服务器下载 deb 包和 dbgsym",
+        "url": "http://10.0.32.60:5001",
+        "tasks_endpoint": "/tasks/"
+    },
+    "system": {
+        "name": "系统配置",
+        "description": "系统级配置",
+        "sudo_password": ""
+    },
+    "paths": {
+        "workspace": "",
+        "code_dir": "",
+        "download_dir": ""
+    }
+}
+EOF
+        echo -e "${GREEN}✅ 配置模板已生成: $config_file${NC}"
+    fi
+}
+
+# 提示用户编辑配置文件
+prompt_edit_config() {
+    local config_file="$CONFIG_DIR/accounts.json"
+
+    echo -e "${BLUE}请编辑配置文件输入账号信息:${NC}"
+    echo -e "${YELLOW}  配置文件: $config_file${NC}"
+    echo ""
+    echo -e "需要填写的内容:"
+    echo -e "  1. shuttle.account.username - Shuttle 用户名"
+    echo -e "  2. shuttle.account.password - Shuttle 密码"
+    echo -e "  3. gerrit.account.username  - Gerrit 用户名"
+    echo -e "  4. gerrit.account.password  - Gerrit 密码"
+    echo ""
+    echo -e "${GREEN}编辑完成后保存并退出，然后按任意键继续...${NC}"
+    echo ""
+
+    # 提示用户使用编辑器
+    if command -v nano &> /dev/null; then
+        nano "$config_file"
+    elif command -v vim &> /dev/null; then
+        vim "$config_file"
+    elif command -v vi &> /dev/null; then
+        vi "$config_file"
+    else
+        echo "请手动编辑: $config_file"
+    fi
+
+    echo -e "${BLUE}重新加载配置...${NC}"
+    source "$CONFIG_DIR/shuttle.env" 2>/dev/null || true
+    source "$CONFIG_DIR/gerrit.env" 2>/dev/null || true
+    source "$CONFIG_DIR/local.env" 2>/dev/null || true
+}
+
+# 从环境变量写入配置文件
+write_config_from_env() {
+    echo -e "${YELLOW}从环境变量写入配置...${NC}"
+
+    # 生成 accounts.json
+    cat > "$CONFIG_DIR/accounts.json" << EOF
+{
+    "shuttle": {
+        "name": "Shuttle UnionTech",
+        "description": "用于从 shuttle.uniontech.com 下载 deb 包",
+        "url": "https://shuttle.uniontech.com",
+        "api_url": "https://shuttle.uniontech.com/api/download",
+        "account": {
+            "username": "$SHUTTLE_USERNAME",
+            "password": "$SHUTTLE_PASSWORD"
+        }
+    },
+    "metabase": {
+        "name": "Metabase",
+        "description": "用于下载崩溃数据",
+        "url": "https://metabase.cicd.getdeepin.org",
+        "api_session": "/api/session",
+        "api_dataset": "/api/dataset",
+        "account": {
+            "username": "app@deepin.org",
+            "password": "deepin123"
+        },
+        "database": {
+            "id": 10,
+            "source_table_id": 196
+        }
+    },
+    "gerrit": {
+        "name": "Gerrit",
+        "description": "用于下载和管理代码仓库",
+        "host": "gerrit.uniontech.com",
+        "port": "29418",
+        "account": {
+            "username": "$GERRIT_USERNAME",
+            "password": "$GERRIT_PASSWORD"
+        },
+        "ssh_key": "~/.ssh/id_rsa"
+    },
+    "internal_server": {
+        "name": "内部构建服务器",
+        "description": "用于从内部构建服务器下载 deb 包和 dbgsym",
+        "url": "http://10.0.32.60:5001",
+        "tasks_endpoint": "/tasks/"
+    },
+    "system": {
+        "name": "系统配置",
+        "description": "系统级配置",
+        "sudo_password": ""
+    },
+    "paths": {
+        "workspace": "$WORKSPACE",
+        "code_dir": "$WORKSPACE/3.代码管理",
+        "download_dir": "$WORKSPACE/4.包管理/下载包/downloads"
+    }
+}
+EOF
+
+    # 生成 shuttle.env
+    cat > "$CONFIG_DIR/shuttle.env" << EOF
+# Shuttle 配置
+SHUTTLE_URL="https://shuttle.uniontech.com"
+SHUTTLE_API_URL="https://shuttle.uniontech.com/api/download"
+SHUTTLE_USERNAME="$SHUTTLE_USERNAME"
+SHUTTLE_PASSWORD="$SHUTTLE_PASSWORD"
+EOF
+
+    # 生成 gerrit.env
+    cat > "$CONFIG_DIR/gerrit.env" << EOF
+# Gerrit 配置
+GERRIT_HOST="gerrit.uniontech.com"
+GERRIT_PORT="29418"
+GERRIT_USER="$GERRIT_USERNAME"
+GERRIT_PASSWORD="$GERRIT_PASSWORD"
+GERRIT_SSH_KEY="~/.ssh/id_rsa"
+EOF
+
+    # 生成 local.env
+    cat > "$CONFIG_DIR/local.env" << EOF
+# 本地路径配置
+WORKSPACE="$WORKSPACE"
+CODE_DIR="$WORKSPACE/3.代码管理"
+DOWNLOAD_DIR="$WORKSPACE/4.包管理/下载包/downloads"
+EOF
+
+    echo -e "${GREEN}✅ 配置已写入${NC}"
+    echo "   - $CONFIG_DIR/accounts.json"
+    echo "   - $CONFIG_DIR/shuttle.env"
+    echo "   - $CONFIG_DIR/gerrit.env"
+    echo "   - $CONFIG_DIR/local.env"
+}
+
 # 帮助信息
 show_help() {
     cat << EOF
@@ -46,8 +282,16 @@ ${GREEN}用法:${NC}
     $0 [选项]
 
 ${GREEN}首次使用:${NC}
-    首次使用必须先配置账号信息:
-    python3 setup_accounts.py
+    首次运行时会提示编辑配置文件输入账号信息
+
+${GREEN}账号配置方式:${NC}
+    方式1: 环境变量传入（推荐自动化使用）
+           SHUTTLE_USERNAME    Shuttle 用户名
+           SHUTTLE_PASSWORD   Shuttle 密码
+           GERRIT_USERNAME    Gerrit 用户名
+           GERRIT_PASSWORD    Gerrit 密码
+    方式2: 编辑配置文件（首次运行时会提示）
+           配置文件: config/accounts.json
 
 ${GREEN}选项:${NC}
     --package <name>       包名（必需）
@@ -65,11 +309,9 @@ ${GREEN}示例:${NC}
     # 分析最近3天的dde-dock崩溃
     $0 --package dde-dock --start-date 2026-04-05 --end-date 2026-04-08
 
-    # 分析最近30天的dde-control-center崩溃
-    $0 --package dde-control-center --start-date 2026-03-08 --end-date 2026-04-08
-
-    # 使用默认参数（最近7天）
-    $0 --package dde-launcher
+    # 使用环境变量传入账号
+    SHUTTLE_USERNAME=user SHUTTLE_PASSWORD=pass GERRIT_USERNAME=user GERRIT_PASSWORD=pass \
+        $0 --package dde-session-ui --start-date 2026-03-14 --end-date 2026-04-14
 
 ${BLUE}=============================================================================
 ${NC}
@@ -373,6 +615,9 @@ main() {
     echo "            dde-dock/dde-control-center 崩溃分析完整流程"
     echo "============================================================================="
     echo -e "${NC}"
+
+    # 检查配置完整性（自动触发交互式配置）
+    check_config
 
     parse_args "$@"
     check_dependencies
