@@ -1,0 +1,15 @@
+# Metabase 批量下载配置 - 带时间限制
+# 格式: package,arch,data_type,start_date,end_date,version
+# 时间范围: 2026-03-01 至 2026-04-03
+
+dde-launcher,x86_64,crash,2026-03-01,2026-04-03
+dde-dock,x86_64,crash,2026-03-01,2026-04-03
+dde-control-center,x86_64,crash,2026-03-01,2026-04-03
+dde-session-shell,x86_64,crash,2026-03-01,2026-04-03
+dde-session-ui,x86_64,crash,2026-03-01,2026-04-03
+dde-daemon,x86_64,crash,2026-03-01,2026-04-03
+dde-api,x86_64,crash,2026-03-01,2026-04-03
+dde-clipboard,x86_64,crash,2026-03-01,2026-04-03
+startdde,x86_64,crash,2026-03-01,2026-04-03
+deepin-update-ui,x86_64,crash,2026-03-01,2026-04-03
+dde-network-core,x86_64,crash,2026-03-01,2026-04-03

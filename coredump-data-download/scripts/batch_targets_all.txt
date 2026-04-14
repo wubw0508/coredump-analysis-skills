@@ -1,0 +1,15 @@
+# Metabase 批量下载配置
+# 格式: package,arch,data_type,start_date,end_date,version (只有 package 必需)
+# 自动下载主要 DDE 组件的崩溃数据
+
+dde-launcher,x86_64,crash
+dde-dock,x86_64,crash
+dde-control-center,x86_64,crash
+dde-session-shell,x86_64,crash
+dde-session-ui,x86_64,crash
+dde-daemon,x86_64,crash
+dde-api,x86_64,crash
+dde-clipboard,x86_64,crash
+startdde,x86_64,crash
+deepin-update-ui,x86_64,crash
+dde-network-core,x86_64,crash

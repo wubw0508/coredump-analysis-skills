@@ -1,0 +1,54 @@
+{
+  "shuttle": {
+    "name": "Shuttle UnionTech",
+    "description": "用于从 shuttle.uniontech.com 下载 deb 包",
+    "url": "https://shuttle.uniontech.com",
+    "api_url": "https://shuttle.uniontech.com/api/download",
+    "account": {
+      "username": "ut000168",
+      "password": "wubowen~123"
+    }
+  },
+  "metabase": {
+    "name": "Metabase",
+    "description": "用于下载崩溃数据",
+    "url": "https://metabase.cicd.getdeepin.org",
+    "api_session": "/api/session",
+    "api_dataset": "/api/dataset",
+    "account": {
+      "username": "app@deepin.org",
+      "password": "deepin123"
+    },
+    "database": {
+      "id": 10,
+      "source_table_id": 196
+    }
+  },
+  "gerrit": {
+    "name": "Gerrit",
+    "description": "用于下载和管理代码仓库",
+    "host": "gerrit.uniontech.com",
+    "port": "29418",
+    "account": {
+      "username": "ut000168",
+      "password": "wubowen~123"
+    },
+    "ssh_key": "~/.ssh/id_rsa"
+  },
+  "internal_server": {
+    "name": "内部构建服务器",
+    "description": "用于从内部构建服务器下载 deb 包和 dbgsym",
+    "url": "http://10.0.32.60:5001",
+    "tasks_endpoint": "/tasks/"
+  },
+  "system": {
+    "name": "系统配置",
+    "description": "系统级配置",
+    "sudo_password": "1"
+  },
+  "paths": {
+    "workspace": "/home/wubw/Desktop/coredump/workspace",
+    "code_dir": "/home/wubw/Desktop/coredump/workspace/3.代码管理",
+    "download_dir": "/home/wubw/Desktop/coredump/workspace/4.包管理/下载包/downloads"
+  }
+}
