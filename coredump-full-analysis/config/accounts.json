@@ -16,8 +16,8 @@
         "api_session": "/api/session",
         "api_dataset": "/api/dataset",
         "account": {
-            "username": "",
-            "password": ""
+            "username": "app@deepin.org",
+            "password": "deepin123"
         },
         "database": {
             "id": 10,
