@@ -45,7 +45,7 @@ GERRIT_PASSWORD="${GERRIT_PASSWORD:-}"
 check_config() {
     echo -e "${BLUE}检查配置完整性...${NC}"
 
-    local setup_script="$SCRIPT_DIR/setup_accounts.py"
+    local accounts_file="$CONFIG_DIR/accounts.json"
 
     # 方法1: 检查是否通过环境变量传入了账号
     if [[ -n "$SHUTTLE_USERNAME" && -n "$SHUTTLE_PASSWORD" && -n "$GERRIT_USERNAME" && -n "$GERRIT_PASSWORD" ]]; then
@@ -54,27 +54,105 @@ check_config() {
         return 0
     fi
 
-    # 方法2: 使用 Python 脚本检查配置
-    if ! python3 "$setup_script" --check 2>/dev/null; then
-        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${YELLOW}检测到缺少必要配置，请编辑配置文件输入账号信息${NC}"
-        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo ""
-
-        # 生成配置模板文件
-        generate_config_template
-
-        # 提示用户编辑
-        prompt_edit_config
-
-        # 重新检查配置
-        if ! python3 "$setup_script" --check 2>/dev/null; then
-            echo -e "${RED}配置仍然不完整，请确保填写了所有账号信息${NC}"
-            exit 1
-        fi
-    else
+    # 方法2: 直接用 jq 检查 accounts.json 配置完整性
+    if [[ -f "$accounts_file" ]] && check_accounts_file "$accounts_file"; then
         echo -e "${GREEN}✅ 配置检查通过${NC}"
+        # 同步配置到 .env 文件
+        sync_env_from_accounts "$accounts_file"
+        return 0
     fi
+
+    # 方法3: 配置不完整，提示用户输入
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}检测到缺少必要配置，请输入账号信息${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    prompt_for_accounts
+    write_config_from_env
+    echo -e "${GREEN}✅ 配置已保存${NC}"
+}
+
+# 检查 accounts.json 配置完整性
+check_accounts_file() {
+    local file="$1"
+
+    # 检查 jq 是否可用
+    if ! command -v jq &> /dev/null; then
+        echo -e "${YELLOW}警告: jq 未安装，无法精确检查配置完整性${NC}"
+        return 0
+    fi
+
+    # 检查必需字段是否存在且非占位符
+    local shuttle_user=$(jq -r '.shuttle.account.username // ""' "$file" 2>/dev/null)
+    local shuttle_pass=$(jq -r '.shuttle.account.password // ""' "$file" 2>/dev/null)
+    local gerrit_user=$(jq -r '.gerrit.account.username // ""' "$file" 2>/dev/null)
+    local gerrit_pass=$(jq -r '.gerrit.account.password // ""' "$file" 2>/dev/null)
+
+    # 检查是否包含占位符
+    if [[ "$shuttle_user" == *"请在此输入"* ]] || [[ "$shuttle_pass" == *"请在此输入"* ]] || \
+       [[ "$gerrit_user" == *"请在此输入"* ]] || [[ "$gerrit_pass" == *"请在此输入"* ]]; then
+        return 1
+    fi
+
+    # 检查是否为空
+    if [[ -z "$shuttle_user" ]] || [[ -z "$shuttle_pass" ]] || \
+       [[ -z "$gerrit_user" ]] || [[ -z "$gerrit_pass" ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+# 同步配置到 .env 文件
+sync_env_from_accounts() {
+    local file="$1"
+
+    if ! command -v jq &> /dev/null; then
+        return
+    fi
+
+    local shuttle_user=$(jq -r '.shuttle.account.username // ""' "$file")
+    local shuttle_pass=$(jq -r '.shuttle.account.password // ""' "$file")
+    local gerrit_user=$(jq -r '.gerrit.account.username // ""' "$file")
+    local gerrit_pass=$(jq -r '.gerrit.account.password // ""' "$file")
+
+    cat > "$CONFIG_DIR/shuttle.env" << EOF
+# Shuttle 配置
+SHUTTLE_URL="https://shuttle.uniontech.com"
+SHUTTLE_API_URL="https://shuttle.uniontech.com/api/download"
+SHUTTLE_USERNAME="$shuttle_user"
+SHUTTLE_PASSWORD="$shuttle_pass"
+EOF
+
+    cat > "$CONFIG_DIR/gerrit.env" << EOF
+# Gerrit 配置
+GERRIT_HOST="gerrit.uniontech.com"
+GERRIT_PORT="29418"
+GERRIT_USER="$gerrit_user"
+GERRIT_PASSWORD="$gerrit_pass"
+GERRIT_SSH_KEY="~/.ssh/id_rsa"
+EOF
+}
+
+# 提示用户输入账号信息
+prompt_for_accounts() {
+    echo -e "${BLUE}━━━ Shuttle 配置 (shuttle.uniontech.com) ━━━${NC}"
+    echo "  用于从 shuttle.uniontech.com 下载 deb 包"
+    echo ""
+
+    read -p "  Shuttle 用户名: " SHUTTLE_USERNAME
+    read -sp "  Shuttle 密码: " SHUTTLE_PASSWORD
+    echo ""
+
+    echo ""
+    echo -e "${BLUE}━━━ Gerrit 配置 (gerrit.uniontech.com) ━━━${NC}"
+    echo "  用于下载和管理代码仓库"
+    echo ""
+
+    read -p "  Gerrit 用户名: " GERRIT_USERNAME
+    read -sp "  Gerrit 密码: " GERRIT_PASSWORD
+    echo ""
 }
 
 # 生成配置模板文件

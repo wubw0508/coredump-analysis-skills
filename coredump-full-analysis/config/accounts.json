@@ -5,8 +5,8 @@
         "url": "https://shuttle.uniontech.com",
         "api_url": "https://shuttle.uniontech.com/api/download",
         "account": {
-            "username": "",
-            "password": ""
+            "username": "在此处输入shuttle账号",
+            "password": "在此处输入shuttle密码"
         }
     },
     "metabase": {
@@ -30,8 +30,8 @@
         "host": "gerrit.uniontech.com",
         "port": "29418",
         "account": {
-            "username": "",
-            "password": ""
+            "username": "在此处输入gerrit账号",
+            "password": "在此处输入gerrit密码"
         },
         "ssh_key": "~/.ssh/id_rsa"
     },
@@ -44,7 +44,7 @@
     "system": {
         "name": "系统配置",
         "description": "系统级配置",
-        "sudo_password": ""
+        "sudo_password": "在此处输入当前登录账户密码"
     },
     "paths": {
         "workspace": "/home/wubw/workspace",
