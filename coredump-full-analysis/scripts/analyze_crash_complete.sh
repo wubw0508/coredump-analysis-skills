@@ -519,10 +519,15 @@ download_source() {
         while IFS= read -r version_line; do
             [[ -z "$version_line" ]] && continue
 
-            # 版本格式可能是 "5.8.14-1:1101" 或 "5.8.14-1"，取冒号前的部分
-            local version="${version_line%%:*}"
+            # 版本格式可能是 "epoch:version:count" 或 "version:count"
+            # 正确的提取方式：去掉最后一个冒号及其后面的内容（count），然后去掉 epoch 前缀
+            local version_with_count="${version_line}"
+            local count="${version_with_count##*:}"  # 取最后一个冒号后面的内容
+            local rest="${version_with_count%:*}"     # 去掉最后一个冒号及后面的内容
+            # 如果还有冒号，说明有 epoch，去掉它
+            local version="${rest#*:}"
 
-            # 清理版本号（移除 epoch 和 -1 后缀）
+            # 清理版本号（移除 epoch 前缀和 -1 后缀）
             local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
 
             echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -792,10 +797,15 @@ main() {
         while IFS= read -r version_line; do
             [[ -z "$version_line" ]] && continue
 
-            # 版本格式可能是 "5.8.14-1:1101" 或 "5.8.14-1"，取冒号前的部分
-            local version="${version_line%%:*}"
+            # 版本格式可能是 "epoch:version:count" 或 "version:count"
+            # 正确的提取方式：去掉最后一个冒号及其后面的内容（count），然后去掉 epoch 前缀
+            local version_with_count="${version_line}"
+            local count="${version_with_count##*:}"  # 取最后一个冒号后面的内容
+            local rest="${version_with_count%:*}"     # 去掉最后一个冒号及后面的内容
+            # 如果还有冒号，说明有 epoch，去掉它
+            local version="${rest#*:}"
 
-            # 清理版本号（移除 epoch 和 -1 后缀）
+            # 清理版本号（移除 epoch 前缀和 -1 后缀）
             local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
 
             echo -e "${BLUE}════════════════════════════════════════════════════════════════════════${NC}"
