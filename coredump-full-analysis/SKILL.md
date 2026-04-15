@@ -20,6 +20,7 @@ coredump-full-analysis/
 │   ├── step3_source.sh                # 步骤3: 代码管理
 │   ├── step4_packages.sh              # 步骤4: 包管理
 │   └── step5_analyze.sh               # 步骤5: 崩溃分析
+├── accounts.json                      # 账号配置文件 (必需)
 ├── config/                           # 配置文件 (自动生成)
 │   ├── metabase.env                   # Metabase配置
 │   ├── gerrit.env                     # Gerrit配置
@@ -35,10 +36,37 @@ coredump-full-analysis/
 
 ## 快速开始
 
+### 0. 使用 Agent（推荐）
+
+使用崩溃分析 Agent，一键执行完整分析流程：
+
+```bash
+cd ~/.claude/skills/coredump-analysis-skills
+
+# 分析 dde-session-ui 最近一个月崩溃 (x86)
+bash run_analysis_agent.sh --package dde-session-ui --start-date 2026-03-14 --end-date 2026-04-14
+
+# 分析 dde-session-ui arm64 架构
+bash run_analysis_agent.sh --package dde-session-ui --arch arm64 --start-date 2026-03-14 --end-date 2026-04-14
+
+# 分析 dde-dock 指定版本范围
+bash run_analysis_agent.sh --package dde-dock --sys-version 1060-1075
+
+# 后台运行
+bash run_analysis_agent.sh --package dde-session-ui --background
+```
+
+**Agent 特点**：
+- 一键执行完整分析流程（下载→筛选→统计）
+- 支持多架构（x86, x86_64, arm64）
+- 支持自定义日期范围、系统版本
+- 后台运行模式
+- 自动使用预设账号
+
 ### 1. 配置账号信息 (首次使用必需)
 
 ```bash
-cd /home/wubw/skills/coredump-full-analysis/scripts
+cd ~/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts
 python3 setup_accounts.py
 ```
 
@@ -62,7 +90,7 @@ python3 setup_accounts.py --non-interactive
 python3 setup_accounts.py --accounts ../centralized/accounts.template.json
 
 # 设置工作目录
-python3 setup_accounts.py --workspace /home/wubw/workspace
+python3 setup_accounts.py --workspace ~/coredump-workspace
 ```
 
 **显示当前配置**：
@@ -73,12 +101,12 @@ python3 setup_accounts.py --show
 ### 2. 一键执行完整分析
 
 ```bash
-bash /home/wubw/skills/coredump-full-analysis/scripts/analyze_crash_complete.sh \
+bash ~/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts/analyze_crash_complete.sh \
     --package dde-session-shell \
     --start-date 2026-03-10 \
     --end-date 2026-04-09 \
     --sys-version 1070-1075 \
-    --workspace /home/wubw/workspace
+    --workspace ~/coredump-workspace
 ```
 
 ## 配置说明
@@ -138,9 +166,9 @@ bash /home/wubw/skills/coredump-full-analysis/scripts/analyze_crash_complete.sh 
     "sudo_password": ""
   },
   "paths": {
-    "workspace": "/home/wubw/workspace",
-    "code_dir": "/home/wubw/workspace/3.代码管理",
-    "download_dir": "/home/wubw/workspace/4.包管理/下载包/downloads"
+    "workspace": "~/coredump-workspace",
+    "code_dir": "~/coredump-workspace/3.代码管理",
+    "download_dir": "~/coredump-workspace/4.包管理/下载包/downloads"
   }
 }
 ```
@@ -161,7 +189,7 @@ bash /home/wubw/skills/coredump-full-analysis/scripts/analyze_crash_complete.sh 
 ### 方式1: 一键执行（推荐）
 
 ```bash
-bash /home/wubw/skills/coredump-full-analysis/scripts/analyze_crash_complete.sh \
+bash ~/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts/analyze_crash_complete.sh \
     --package dde-session-shell \
     --start-date 2026-04-01 \
     --end-date 2026-04-08
@@ -317,4 +345,5 @@ chmod +x setup_accounts.py
 ## 相关文档
 
 - `centralized/accounts.template.json` - 账号配置模板
+- `accounts.json` - 主账号配置文件 (必需)
 - `config/` - 各服务配置文件 (自动生成)

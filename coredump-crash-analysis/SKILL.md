@@ -30,15 +30,15 @@ coredump-crash-analysis/
 ### 完整流程分析
 
 ```bash
-cd /home/wubw/skills/coredump-full-analysis/scripts
-bash analyze_crash_complete.sh --package dde-dock --workspace /home/wubw/workspace
+cd ~/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts
+bash analyze_crash_complete.sh --package dde-dock --workspace ~/coredump-workspace
 ```
 
 ### 单独运行崩溃分析
 
 ```bash
-cd /home/wubw/skills/coredump-crash-analysis/scripts
-python3 analyze_crash_final.py --package dde-dock --workspace /home/wubw/workspace
+cd ~/.claude/skills/coredump-analysis-skills/coredump-crash-analysis/scripts
+python3 analyze_crash_final.py --package dde-dock --workspace ~/coredump-workspace
 ```
 
 ## 通用模块 (centralized/)

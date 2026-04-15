@@ -25,7 +25,7 @@ cd <workspace>/4.包管理
 ## 脚本位置
 
 ```bash
-/home/wubw/.nvm/versions/node/v24.14.1/lib/node_modules/openclaw/skills/coredump-package-management/scripts/
+~/.claude/skills/coredump-analysis-skills/coredump-package-management/scripts/
 ├── generate_tasks.py      # 生成下载任务
 └── scan_and_download.py  # 下载并安装包
 ```

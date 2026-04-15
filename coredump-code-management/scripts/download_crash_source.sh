@@ -195,15 +195,28 @@ if [ -n "$CHECKOUT_TAG" ]; then
     echo -e "  切换方式: ${GREEN}$CHECKOUT_METHOD${NC}"
     echo -e "  目标版本: ${GREEN}$CHECKOUT_TAG${NC}"
 
-    if git -C "$CODE_PATH" checkout "$CHECKOUT_TAG" 2>/dev/null; then
-        echo -e "${GREEN}  切换成功${NC}"
-    else
-        # checkout 失败，尝试创建新分支
-        FIX_BRANCH="fix/${PACKAGE}-${VERSION_CLEAN}"
-        if git -C "$CODE_PATH" checkout -b "$FIX_BRANCH" "$CHECKOUT_TAG" 2>/dev/null; then
-            echo -e "${GREEN}  创建并切换到新分支: $FIX_BRANCH${NC}"
+    # 创建新分支并切换
+    FIX_BRANCH="${PACKAGE}-${VERSION_CLEAN}"
+    echo -e "  创建分支: ${YELLOW}$FIX_BRANCH${NC}"
+
+    if git -C "$CODE_PATH" checkout -b "$FIX_BRANCH" "$CHECKOUT_TAG" 2>/dev/null; then
+        echo -e "  ${GREEN}✅ 分支创建成功${NC}"
+
+        # 硬重置到版本标签，确保代码与版本完全一致
+        echo -e "  执行: git reset --hard $CHECKOUT_TAG"
+        if git -C "$CODE_PATH" reset --hard "$CHECKOUT_TAG" 2>/dev/null; then
+            echo -e "  ${GREEN}✅ 代码重置成功${NC}"
         else
-            echo -e "${RED}  切换失败${NC}"
+            echo -e "  ${YELLOW}⚠️ 代码重置失败，使用当前状态${NC}"
+        fi
+    else
+        # 分支可能已存在，尝试切换并重置
+        echo -e "  ${YELLOW}分支已存在，尝试切换...${NC}"
+        if git -C "$CODE_PATH" checkout "$FIX_BRANCH" 2>/dev/null && \
+           git -C "$CODE_PATH" reset --hard "$CHECKOUT_TAG" 2>/dev/null; then
+            echo -e "  ${GREEN}✅ 切换并重置成功${NC}"
+        else
+            echo -e "  ${RED}❌ 切换失败${NC}"
         fi
     fi
 else

@@ -74,7 +74,9 @@ DEFAULT_CONFIG = {
 # 配置文件路径
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CONFIG_DIR = SCRIPT_DIR.parent / "config"
-ACCOUNTS_FILE = CONFIG_DIR / "accounts.json"
+# 项目根目录账号配置
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+ACCOUNTS_FILE = PROJECT_ROOT / "accounts.json"
 CENTRALIZED_CONFIG = CONFIG_DIR / "centralized_config.json"
 
 

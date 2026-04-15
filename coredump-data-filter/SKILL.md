@@ -17,7 +17,7 @@ cd $COREDUMP_WORKSPACE/2.数据筛选
 ## 脚本位置
 
 ```bash
-/home/wubw/.nvm/versions/node/v24.14.1/lib/node_modules/openclaw/skills/coredump-data-filter/scripts/filter_crash_data.py
+~/.claude/skills/coredump-analysis-skills/coredump-data-filter/scripts/filter_crash_data.py
 ```
 
 ## 使用方法

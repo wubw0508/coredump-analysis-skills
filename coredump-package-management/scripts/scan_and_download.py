@@ -12,6 +12,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -85,12 +86,34 @@ class DebDownloader:
             # 筛选目标包（主包和 dbgsym 包）
             target_files = []
             for deb_file in deb_files:
-                # 精确匹配版本
+                # 使用前缀匹配版本（支持 epoch:version 或 version 或 version-1 格式）
                 if version:
-                    main_pattern = f"{package}_{version}_{self.arch}.deb"
-                    debug_pattern = f"{package}-dbgsym_{version}_{self.arch}.deb"
-                    if deb_file == main_pattern or deb_file == debug_pattern:
-                        target_files.append(deb_file)
+                    # 主包匹配：package_version_arch.deb
+                    # 去掉 version 中的 epoch（前缀的数字+冒号）
+                    clean_version = version.split(':')[-1] if ':' in version else version
+                    # 去掉 -1 后缀（Debian 版本格式）
+                    base_version = clean_version.rsplit('-', 1)[0] if clean_version.endswith('-1') else clean_version
+
+                    # 尝试多种版本格式匹配
+                    version_formats = [
+                        version,           # 原始版本
+                        clean_version,     # 去掉 epoch
+                        base_version,     # 去掉 -1
+                    ]
+
+                    matched = False
+                    for v in version_formats:
+                        if deb_file == f"{package}_{v}_{self.arch}.deb" or \
+                           deb_file == f"{package}-dbgsym_{v}_{self.arch}.deb":
+                            target_files.append(deb_file)
+                            matched = True
+                            break
+
+                    # 如果没精确匹配，尝试前缀匹配（模糊匹配）
+                    if not matched:
+                        if deb_file.startswith(f"{package}_{version}") or \
+                           deb_file.startswith(f"{package}-dbgsym_{version}"):
+                            target_files.append(deb_file)
                 else:
                     # 无版本时匹配所有版本
                     if (deb_file.startswith(f"{package}_") and deb_file.endswith(f"_{self.arch}.deb")) or \
@@ -126,18 +149,20 @@ class DebDownloader:
 
     def download_file(self, task_id, filename):
         """下载单个文件"""
-        filepath = self.download_dir / filename
+        # URL decode filename (e.g., %2B -> +)
+        decoded_filename = unquote(filename)
+        filepath = self.download_dir / decoded_filename
 
         if filepath.exists():
-            logger.info(f"  文件已存在，跳过: {filename}")
+            logger.info(f"  文件已存在，跳过: {decoded_filename}")
             return True
 
-        # 尝试多个可能的路径
+        # 尝试多个可能的路径，使用URL解码后的文件名
         possible_paths = [
-            f"/tasks/{task_id}/{self.subdir}/{filename}",
-            f"/tasks/{task_id}/{filename}",
-            f"/tasks/{task_id}/amd64/{filename}",
-            f"/tasks/{task_id}/unstable/{filename}",
+            f"/tasks/{task_id}/{self.subdir}/{decoded_filename}",
+            f"/tasks/{task_id}/{decoded_filename}",
+            f"/tasks/{task_id}/amd64/{decoded_filename}",
+            f"/tasks/{task_id}/unstable/{decoded_filename}",
         ]
 
         for path in possible_paths:
@@ -147,11 +172,11 @@ class DebDownloader:
                 head_resp = self.session.head(url, timeout=10)
                 if head_resp.status_code == 200:
                     logger.info(f"  下载: {url}")
-                    return self._do_download(url, filepath, filename)
+                    return self._do_download(url, filepath, decoded_filename)
             except Exception:
                 continue
 
-        logger.error(f"  ✗ 无法找到文件: {filename}")
+        logger.error(f"  ✗ 无法找到文件: {decoded_filename}")
         return False
 
     def _do_download(self, url, filepath, filename):

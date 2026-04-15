@@ -2,6 +2,33 @@
 
 DDE/UOS 崩溃数据分析工具集，提供从数据下载、筛选去重、源码管理、包管理到崩溃分析的完整流程。
 
+## Agent 使用（推荐）
+
+使用崩溃分析 Agent，一键执行完整分析流程：
+
+```bash
+cd ~/.claude/skills/coredump-analysis-skills
+
+# 分析 dde-session-ui 最近一个月崩溃 (x86)
+bash run_analysis_agent.sh --package dde-session-ui --start-date 2026-03-14 --end-date 2026-04-14
+
+# 分析 dde-session-ui arm64 架构
+bash run_analysis_agent.sh --package dde-session-ui --arch arm64 --start-date 2026-03-14 --end-date 2026-04-14
+
+# 后台运行
+bash run_analysis_agent.sh --package dde-session-ui --background
+
+# 查看帮助
+bash run_analysis_agent.sh --help
+```
+
+**Agent 特点**：
+- 一键执行完整分析流程（下载→筛选→统计）
+- 支持多架构（x86, x86_64, arm64）
+- 支持自定义日期范围、系统版本
+- 后台运行模式
+- 自动使用预设账号
+
 ## Skills 列表
 
 | Skill | 功能 | 触发词示例 |
@@ -21,8 +48,7 @@ DDE/UOS 崩溃数据分析工具集，提供从数据下载、筛选去重、源
 
 ```bash
 # 1. 首次使用，配置账号
-cd coredump-full-analysis/scripts
-python3 setup_accounts.py
+python3 coredump-full-analysis/scripts/setup_accounts.py
 
 # 2. 执行完整分析
 bash analyze_crash_complete.sh \
@@ -70,6 +96,8 @@ python3 analyze_crash_final.py --package dde-dock
 
 ```
 coredump-analysis-skills/
+├── accounts.json                          # 账号配置文件（必需）
+├── run_analysis_agent.sh                   # 一键分析入口脚本
 ├── coredump-data-download/       # 数据下载
 ├── coredump-data-filter/         # 数据筛选去重
 ├── coredump-code-management/     # 源码管理
@@ -77,3 +105,21 @@ coredump-analysis-skills/
 ├── coredump-crash-analysis/      # 崩溃分析
 └── coredump-full-analysis/       # 完整流程
 ```
+
+## 账号配置（必需）
+
+首次使用前，必须配置 `accounts.json`：
+
+```bash
+cd ~/.claude/skills/coredump-analysis-skills
+python3 coredump-full-analysis/scripts/setup_accounts.py
+```
+
+或直接编辑 `accounts.json`（项目根目录）。
+
+**关键配置项**：
+- `shuttle.account` — Shuttle 下载账号
+- `gerrit.account` — Gerrit 代码仓库账号
+- `system.sudo_password` — 当前用户密码（用于安装调试符号）
+
+**运行前检查**：`run_analysis_agent.sh` 会自动检测 `accounts.json` 是否包含未填写的占位符，若未配置则报错退出。

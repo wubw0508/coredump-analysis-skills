@@ -27,7 +27,7 @@ cd <workspace>/1.数据下载
 脚本位于skills目录下的 `scripts/` 子目录：
 
 ```bash
-/home/wubw/.nvm/versions/node/v24.14.1/lib/node_modules/openclaw/skills/coredump-data-download/scripts/download_metabase_csv.sh
+~/.claude/skills/coredump-analysis-skills/coredump-data-download/scripts/download_metabase_csv.sh
 ```
 
 使用时可以：

@@ -13,12 +13,14 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Skills目录
-SKILLS_DIR="/home/ut000168@uos/code/coredump-analysis-skills"
+# Skills目录（脚本所在目录的父目录）
+SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills/coredump-analysis-skills}"
 
 # 脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$SCRIPT_DIR/../config"
+# 项目根目录账号配置
+PROJECT_ROOT_ACCOUNTS="$SKILLS_DIR/accounts.json"
 
 # 加载配置
 source "$CONFIG_DIR/metabase.env" 2>/dev/null || true
@@ -33,6 +35,7 @@ PACKAGE="${PACKAGE:-}"
 START_DATE="${START_DATE:-}"
 END_DATE="${END_DATE:-}"
 SYS_VERSION="${SYS_VERSION:-1070-1075}"
+ARCH="${ARCH:-x86}"
 WORKSPACE="${WORKSPACE:-./workspace}"
 
 # 支持通过环境变量传入账号配置（优先级最高）
@@ -45,7 +48,13 @@ GERRIT_PASSWORD="${GERRIT_PASSWORD:-}"
 check_config() {
     echo -e "${BLUE}检查配置完整性...${NC}"
 
-    local accounts_file="$CONFIG_DIR/accounts.json"
+    # 优先使用项目根目录的 accounts.json，其次使用 config/ 目录
+    local accounts_file=""
+    if [[ -f "$PROJECT_ROOT_ACCOUNTS" ]]; then
+        accounts_file="$PROJECT_ROOT_ACCOUNTS"
+    elif [[ -f "$CONFIG_DIR/accounts.json" ]]; then
+        accounts_file="$CONFIG_DIR/accounts.json"
+    fi
 
     # 方法1: 检查是否通过环境变量传入了账号
     if [[ -n "$SHUTTLE_USERNAME" && -n "$SHUTTLE_PASSWORD" && -n "$GERRIT_USERNAME" && -n "$GERRIT_PASSWORD" ]]; then
@@ -131,7 +140,7 @@ GERRIT_HOST="gerrit.uniontech.com"
 GERRIT_PORT="29418"
 GERRIT_USER="$gerrit_user"
 GERRIT_PASSWORD="$gerrit_pass"
-GERRIT_SSH_KEY="~/.ssh/id_rsa"
+GERRIT_SSH_KEY="$HOME/.ssh/id_rsa"
 EOF
 }
 
@@ -155,110 +164,27 @@ prompt_for_accounts() {
     echo ""
 }
 
-# 生成配置模板文件
-generate_config_template() {
-    local config_file="$CONFIG_DIR/accounts.json"
-
-    if [[ ! -f "$config_file" ]]; then
-        cat > "$config_file" << 'EOF'
-{
-    "shuttle": {
-        "name": "Shuttle UnionTech",
-        "description": "用于从 shuttle.uniontech.com 下载 deb 包",
-        "url": "https://shuttle.uniontech.com",
-        "api_url": "https://shuttle.uniontech.com/api/download",
-        "account": {
-            "username": "请在此输入Shuttle用户名",
-            "password": "请在此输入Shuttle密码"
-        }
-    },
-    "metabase": {
-        "name": "Metabase",
-        "description": "用于下载崩溃数据",
-        "url": "https://metabase.cicd.getdeepin.org",
-        "api_session": "/api/session",
-        "api_dataset": "/api/dataset",
-        "account": {
-            "username": "app@deepin.org",
-            "password": "deepin123"
-        },
-        "database": {
-            "id": 10,
-            "source_table_id": 196
-        }
-    },
-    "gerrit": {
-        "name": "Gerrit",
-        "description": "用于下载和管理代码仓库",
-        "host": "gerrit.uniontech.com",
-        "port": "29418",
-        "account": {
-            "username": "请在此输入Gerrit用户名",
-            "password": "请在此输入Gerrit密码"
-        },
-        "ssh_key": "~/.ssh/id_rsa"
-    },
-    "internal_server": {
-        "name": "内部构建服务器",
-        "description": "用于从内部构建服务器下载 deb 包和 dbgsym",
-        "url": "http://10.0.32.60:5001",
-        "tasks_endpoint": "/tasks/"
-    },
-    "system": {
-        "name": "系统配置",
-        "description": "系统级配置",
-        "sudo_password": ""
-    },
-    "paths": {
-        "workspace": "",
-        "code_dir": "",
-        "download_dir": ""
-    }
-}
-EOF
-        echo -e "${GREEN}✅ 配置模板已生成: $config_file${NC}"
-    fi
-}
-
-# 提示用户编辑配置文件
-prompt_edit_config() {
-    local config_file="$CONFIG_DIR/accounts.json"
-
-    echo -e "${BLUE}请编辑配置文件输入账号信息:${NC}"
-    echo -e "${YELLOW}  配置文件: $config_file${NC}"
-    echo ""
-    echo -e "需要填写的内容:"
-    echo -e "  1. shuttle.account.username - Shuttle 用户名"
-    echo -e "  2. shuttle.account.password - Shuttle 密码"
-    echo -e "  3. gerrit.account.username  - Gerrit 用户名"
-    echo -e "  4. gerrit.account.password  - Gerrit 密码"
-    echo ""
-    echo -e "${GREEN}编辑完成后保存并退出，然后按任意键继续...${NC}"
-    echo ""
-
-    # 提示用户使用编辑器
-    if command -v nano &> /dev/null; then
-        nano "$config_file"
-    elif command -v vim &> /dev/null; then
-        vim "$config_file"
-    elif command -v vi &> /dev/null; then
-        vi "$config_file"
-    else
-        echo "请手动编辑: $config_file"
-    fi
-
-    echo -e "${BLUE}重新加载配置...${NC}"
-    source "$CONFIG_DIR/shuttle.env" 2>/dev/null || true
-    source "$CONFIG_DIR/gerrit.env" 2>/dev/null || true
-    source "$CONFIG_DIR/local.env" 2>/dev/null || true
-}
-
 # 从环境变量写入配置文件
 write_config_from_env() {
     echo -e "${YELLOW}从环境变量写入配置...${NC}"
 
-    # 生成 accounts.json
-    cat > "$CONFIG_DIR/accounts.json" << EOF
+    # 优先使用项目根目录的 accounts.json
+    local accounts_file="$PROJECT_ROOT_ACCOUNTS"
+    if [[ ! -f "$accounts_file" ]] && [[ -f "$CONFIG_DIR/accounts.json" ]]; then
+        accounts_file="$CONFIG_DIR/accounts.json"
+    fi
+
+    # 如果已存在配置文件，只更新账号部分，保留 paths 等其他配置
+    if [[ -f "$accounts_file" ]] && command -v jq &> /dev/null; then
+        jq --arg su "$SHUTTLE_USERNAME" \
+           --arg sp "$SHUTTLE_PASSWORD" \
+           --arg gu "$GERRIT_USERNAME" \
+           --arg gp "$GERRIT_PASSWORD" \
+           '.shuttle.account.username = $su | .shuttle.account.password = $sp | .gerrit.account.username = $gu | .gerrit.account.password = $gp' \
+           "$accounts_file" > "${accounts_file}.tmp" && mv "${accounts_file}.tmp" "$accounts_file"
+    else
+        # 生成完整的 accounts.json
+        cat > "$accounts_file" << EOF
 {
     "shuttle": {
         "name": "Shuttle UnionTech",
@@ -294,7 +220,7 @@ write_config_from_env() {
             "username": "$GERRIT_USERNAME",
             "password": "$GERRIT_PASSWORD"
         },
-        "ssh_key": "~/.ssh/id_rsa"
+        "ssh_key": "$HOME/.ssh/id_rsa"
     },
     "internal_server": {
         "name": "内部构建服务器",
@@ -308,12 +234,13 @@ write_config_from_env() {
         "sudo_password": ""
     },
     "paths": {
-        "workspace": "$WORKSPACE",
-        "code_dir": "$WORKSPACE/3.代码管理",
-        "download_dir": "$WORKSPACE/4.包管理/下载包/downloads"
+        "workspace": "",
+        "code_dir": "",
+        "download_dir": ""
     }
 }
 EOF
+    fi
 
     # 生成 shuttle.env
     cat > "$CONFIG_DIR/shuttle.env" << EOF
@@ -331,7 +258,7 @@ GERRIT_HOST="gerrit.uniontech.com"
 GERRIT_PORT="29418"
 GERRIT_USER="$GERRIT_USERNAME"
 GERRIT_PASSWORD="$GERRIT_PASSWORD"
-GERRIT_SSH_KEY="~/.ssh/id_rsa"
+GERRIT_SSH_KEY="$HOME/.ssh/id_rsa"
 EOF
 
     # 生成 local.env
@@ -339,11 +266,11 @@ EOF
 # 本地路径配置
 WORKSPACE="$WORKSPACE"
 CODE_DIR="$WORKSPACE/3.代码管理"
-DOWNLOAD_DIR="$WORKSPACE/4.包管理/下载包/downloads"
+DOWNLOAD_DIR="$WORKSPACE/4.包管理/downloads"
 EOF
 
     echo -e "${GREEN}✅ 配置已写入${NC}"
-    echo "   - $CONFIG_DIR/accounts.json"
+    echo "   - $PROJECT_ROOT_ACCOUNTS"
     echo "   - $CONFIG_DIR/shuttle.env"
     echo "   - $CONFIG_DIR/gerrit.env"
     echo "   - $CONFIG_DIR/local.env"
@@ -380,6 +307,8 @@ ${GREEN}选项:${NC}
                            例如: 2026-04-08
     --sys-version <ver>   系统版本范围（默认: 1070-1075）
                            例如: 1070, 1070-1075
+    --arch <arch>         架构（默认: x86）
+                           例如: x86, x86_64, arm64
     --workspace <dir>      工作目录（默认: ./workspace）
     --help, -h            显示此帮助信息
 
@@ -414,6 +343,10 @@ parse_args() {
                 ;;
             --sys-version)
                 SYS_VERSION="$2"
+                shift 2
+                ;;
+            --arch)
+                ARCH="$2"
                 shift 2
                 ;;
             --workspace)
@@ -480,185 +413,321 @@ check_dependencies() {
 setup_workspace() {
     print_step 1 "创建工作目录"
 
-    mkdir -p "$WORKSPACE"/{1.数据下载,2.数据筛选,3.代码管理,4.包管理/下载包,5.崩溃分析}
+    mkdir -p "$WORKSPACE"/{1.数据下载,2.数据筛选,3.代码管理,4.包管理/downloads,5.崩溃分析}
 
     echo -e "${GREEN}✅ 工作目录已创建: $WORKSPACE${NC}"
 }
 
 # 步骤1: 下载数据
 download_data() {
-    print_step 1 "数据下载"
+    print_step 1 "数据下载" >&2
 
     local download_script="$SKILLS_DIR/coredump-data-download/scripts/download_metabase_csv.sh"
 
     if [[ ! -f "$download_script" ]]; then
-        echo -e "${RED}错误: 下载脚本不存在: $download_script${NC}"
+        echo -e "${RED}错误: 下载脚本不存在: $download_script${NC}" >&2
         exit 1
     fi
 
-    # 复制脚本到工作目录
-    cp "$download_script" "$WORKSPACE/1.数据下载/"
-    chmod +x "$WORKSPACE/1.数据下载/download_metabase_csv.sh"
-
-    # 构建命令
-    local cmd="./download_metabase_csv.sh"
-    [[ -n "$START_DATE" ]] && cmd="$cmd --start-date $START_DATE"
-    [[ -n "$END_DATE" ]] && cmd="$cmd --end-date $END_DATE"
-    [[ -n "$SYS_VERSION" ]] && cmd="$cmd --sys-version $SYS_VERSION"
-    cmd="$cmd $PACKAGE x86 crash"
-
-    echo -e "${YELLOW}执行: $cmd${NC}"
-    echo ""
+    # 直接使用原始脚本，不复制到workspace
+    echo -e "${YELLOW}执行: bash $download_script${NC}" >&2
+    echo "" >&2
 
     cd "$WORKSPACE/1.数据下载"
-    eval "$cmd"
+    bash "$download_script" \
+        --start-date "$START_DATE" \
+        --end-date "$END_DATE" \
+        --sys-version "$SYS_VERSION" \
+        "$PACKAGE" "$ARCH" crash >&2
 
     # 查找下载的文件
     local csv_file=$(find "$WORKSPACE/1.数据下载" -name "${PACKAGE}_X86_crash_*.csv" -type f | sort | tail -1)
 
     if [[ -z "$csv_file" ]]; then
-        echo -e "${RED}错误: 数据下载失败，未找到CSV文件${NC}"
+        echo -e "${RED}错误: 数据下载失败，未找到CSV文件${NC}" >&2
         exit 1
     fi
 
     local line_count=$(wc -l < "$csv_file")
-    echo -e "${GREEN}✅ 数据下载完成: $csv_file ($line_count 行)${NC}"
+    echo -e "${GREEN}✅ 数据下载完成: $csv_file ($line_count 行)${NC}" >&2
 
-    # 返回CSV文件路径
-    echo "$csv_file"
+    # 返回CSV文件路径到stdout
+    printf "%s" "$csv_file"
 }
 
 # 步骤2: 数据筛选/去重
 filter_data() {
-    print_step 2 "数据筛选/去重"
+    # 所有输出必须重定向到 stderr，确保 stdout 只有文件路径
+    print_step 2 "数据筛选/去重" >&2
 
     local input_csv="$1"
     local filter_script="$SKILLS_DIR/coredump-data-filter/scripts/filter_crash_data.py"
 
     if [[ ! -f "$filter_script" ]]; then
-        echo -e "${RED}错误: 筛选脚本不存在: $filter_script${NC}"
+        echo -e "${RED}错误: 筛选脚本不存在: $filter_script${NC}" >&2
         exit 1
     fi
 
-    # 复制脚本
-    cp "$filter_script" "$WORKSPACE/2.数据筛选/"
-    chmod +x "$WORKSPACE/2.数据筛选/filter_crash_data.py"
+    echo -e "${YELLOW}执行: python3 $filter_script --workspace $WORKSPACE $PACKAGE${NC}" >&2
+    echo "" >&2
 
-    # 修改脚本中的路径
-    sed -i "s|WORKSPACE = \"/home/wubw/Desktop/coredump/workspace\"|WORKSPACE = \"$WORKSPACE\"|g" \
-        "$WORKSPACE/2.数据筛选/filter_crash_data.py"
-
-    echo -e "${YELLOW}执行: python3 filter_crash_data.py $PACKAGE${NC}"
-    echo ""
-
+    # 直接使用原始脚本，输出全部发送到 stderr
     cd "$WORKSPACE/2.数据筛选"
-    python3 filter_crash_data.py "$PACKAGE"
+    python3 "$filter_script" --workspace "$WORKSPACE" "$PACKAGE" >&2
 
     local filtered_csv="$WORKSPACE/2.数据筛选/filtered_${PACKAGE}_crash_data.csv"
     local stats_json="$WORKSPACE/2.数据筛选/${PACKAGE}_crash_statistics.json"
 
     if [[ -f "$filtered_csv" ]]; then
-        echo -e "${GREEN}✅ 数据筛选完成: $filtered_csv${NC}"
+        echo -e "${GREEN}✅ 数据筛选完成${NC}" >&2
     fi
 
     if [[ -f "$stats_json" ]]; then
-        echo -e "${GREEN}✅ 统计报告已生成: $stats_json${NC}"
-        echo ""
-        echo -e "${YELLOW}统计摘要:${NC}"
-        jq '.summary' "$stats_json" 2>/dev/null || cat "$stats_json"
+        echo -e "${GREEN}✅ 统计报告已生成${NC}" >&2
+        echo "" >&2
+        echo -e "${YELLOW}统计摘要:${NC}" >&2
+        jq '.summary' "$stats_json" >&2 || cat "$stats_json" >&2
     fi
 
-    echo "$filtered_csv"
+    # 只向 stdout 输出文件路径（无任何其他输出）
+    printf "%s" "$filtered_csv"
 }
 
-# 步骤3: 代码管理
+# 步骤3: 代码管理 - 为每个崩溃版本切换代码分支
 download_source() {
-    print_step 3 "代码管理"
+    print_step 3 "代码管理" >&2
 
     local filtered_csv="$1"
     local source_script="$SKILLS_DIR/coredump-code-management/scripts/download_crash_source.sh"
 
     if [[ ! -f "$source_script" ]]; then
         echo -e "${RED}错误: 代码管理脚本不存在: $source_script${NC}"
-        exit 1
+        return 1
     fi
 
-    # 复制脚本
-    cp "$source_script" "$WORKSPACE/3.代码管理/"
-    chmod +x "$WORKSPACE/3.代码管理/download_crash_source.sh"
+    # 从崩溃版本列表获取所有需要处理的版本
+    local versions_txt="$WORKSPACE/2.数据筛选/${PACKAGE}_crash_versions.txt"
+    if [[ -f "$versions_txt" ]]; then
+        echo -e "${YELLOW}从版本列表读取需要处理的版本...${NC}"
+        local version_count=$(wc -l < "$versions_txt")
+        echo -e "${YELLOW}共 ${version_count} 个版本需要处理${NC}"
+        echo ""
 
-    echo -e "${YELLOW}执行: ./download_crash_source.sh $filtered_csv 2${NC}"
-    echo ""
+        # 逐个版本处理
+        local success_count=0
+        local fail_count=0
+        while IFS= read -r version_line; do
+            [[ -z "$version_line" ]] && continue
 
-    cd "$WORKSPACE/3.代码管理"
-    ./download_crash_source.sh "$filtered_csv" 2
+            # 版本格式可能是 "5.8.14-1:1101" 或 "5.8.14-1"，取冒号前的部分
+            local version="${version_line%%:*}"
 
-    if [[ -d "$WORKSPACE/3.代码管理/$PACKAGE" ]]; then
-        echo -e "${GREEN}✅ 源码已克隆: $WORKSPACE/3.代码管理/$PACKAGE${NC}"
+            # 清理版本号（移除 epoch 和 -1 后缀）
+            local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
+
+            echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${YELLOW}处理版本: $version -> $clean_version${NC}"
+            echo ""
+
+            # 设置环境变量并执行脚本
+            if COREDUMP_WORKSPACE="$WORKSPACE" GERRIT_USER="$GERRIT_USER" GERRIT_HOST="${GERRIT_HOST:-gerrit.uniontech.com}" GERRIT_PORT="${GERRIT_PORT:-29418}" \
+               bash "$source_script" "$PACKAGE" "$clean_version"; then
+                ((success_count++)) || true
+            else
+                ((fail_count++)) || true
+            fi
+            echo ""
+        done < "$versions_txt"
+
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${GREEN}代码管理完成: 成功 ${success_count} 个版本${NC}"
+        if [[ $fail_count -gt 0 ]]; then
+            echo -e "${YELLOW}失败 ${fail_count} 个版本${NC}"
+        fi
+    else
+        echo -e "${YELLOW}未找到版本列表文件${NC}"
     fi
 }
 
-# 步骤4: 包管理
+# ============================================================
+# 以下是按版本处理的步骤（3+4+5 整合为版本循环）
+# ============================================================
+
+# 步骤3: 切换代码到指定版本
+download_source_for_version() {
+    local package="$1"
+    local version="$2"
+    local source_script="$SKILLS_DIR/coredump-code-management/scripts/download_crash_source.sh"
+
+    if [[ ! -f "$source_script" ]]; then
+        echo -e "${RED}错误: 代码管理脚本不存在: $source_script${NC}" >&2
+        return 1
+    fi
+
+    echo -e "${YELLOW}━━━ 步骤3: 切换代码到 $version ━━━${NC}"
+
+    # 设置环境变量并执行脚本
+    if COREDUMP_WORKSPACE="$WORKSPACE" GERRIT_USER="$GERRIT_USER" GERRIT_HOST="${GERRIT_HOST:-gerrit.uniontech.com}" GERRIT_PORT="${GERRIT_PORT:-29418}" \
+       bash "$source_script" "$package" "$version" >&2; then
+        echo -e "${GREEN}✅ 代码切换完成${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ 代码切换失败${NC}"
+        return 1
+    fi
+}
+
+# 步骤4: 下载指定版本的包
+download_packages_for_version() {
+    local package="$1"
+    local version="$2"
+    local dl_script="$SKILLS_DIR/coredump-package-management/scripts/scan_and_download.py"
+    local dl_dir="$WORKSPACE/4.包管理/downloads"
+
+    if [[ ! -f "$dl_script" ]]; then
+        echo -e "${RED}错误: 包下载脚本不存在: $dl_script${NC}" >&2
+        return 1
+    fi
+
+    echo -e "${YELLOW}━━━ 步骤4: 下载 $version 的包 ━━━${NC}"
+
+    # 创建下载目录
+    mkdir -p "$dl_dir"
+
+    # 清理版本号（用于文件名匹配）
+    local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
+
+    # 下载该版本的包和调试符号（使用位置参数格式）
+    echo -e "${YELLOW}下载 $package ${clean_version} ...${NC}"
+    python3 "$dl_script" \
+        -d "$dl_dir" \
+        "$package" "$clean_version" 2>&1 || true
+
+    echo -e "${GREEN}✅ 包下载完成${NC}"
+    return 0
+}
+
+# 步骤5: 安装包并分析指定版本的崩溃
+analyze_crashes_for_version() {
+    local package="$1"
+    local version="$2"
+    local filtered_csv="$3"
+    local analyze_script="$SKILLS_DIR/coredump-full-analysis/scripts/analyze_crash_per_version.py"
+
+    if [[ ! -f "$analyze_script" ]]; then
+        echo -e "${RED}错误: 分析脚本不存在: $analyze_script${NC}" >&2
+        return 1
+    fi
+
+    echo -e "${YELLOW}━━━ 步骤5: 分析 $version 的崩溃 ━━━${NC}"
+
+    # 清理版本号
+    local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
+
+    # 安装该版本的 deb 包（如果存在）
+    local deb_dir="$WORKSPACE/4.包管理/downloads"
+    if [[ -d "$deb_dir" ]]; then
+        local deb_file=$(find "$deb_dir" -name "${package}_${clean_version}_*.deb" -type f 2>/dev/null | head -1)
+        if [[ -n "$deb_file" && -f "$deb_file" ]]; then
+            echo -e "${YELLOW}安装: $deb_file${NC}"
+            sudo dpkg -i "$deb_file" 2>&1 || true
+        fi
+    fi
+
+    # 执行分析（使用 analyze_crash_per_version.py 保存 JSON 报告）
+    python3 "$analyze_script" \
+        --package "$package" \
+        --version "$clean_version" \
+        --workspace "$WORKSPACE" \
+        --max-crashes 50 2>&1 || true
+
+    echo -e "${GREEN}✅ 版本 $version 分析完成${NC}"
+    return 0
+}
+
+# 步骤4: 包管理（保留用于批量生成任务）
 download_packages() {
-    print_step 4 "包管理"
+    print_step 4 "包管理" >&2
 
     local filtered_csv="$1"
     local gen_script="$SKILLS_DIR/coredump-package-management/scripts/generate_tasks.py"
     local dl_script="$SKILLS_DIR/coredump-package-management/scripts/scan_and_download.py"
+    local dl_dir="$WORKSPACE/4.包管理/downloads"
 
     if [[ ! -f "$gen_script" ]]; then
         echo -e "${RED}错误: 任务生成脚本不存在: $gen_script${NC}"
         exit 1
     fi
 
-    # 复制脚本
-    cp "$gen_script" "$WORKSPACE/4.包管理/下载包/"
-    chmod +x "$WORKSPACE/4.包管理/下载包/"*.py
-
-    # 修改脚本路径
-    sed -i "s|WORKSPACE = \"/home/wubw/Desktop/coredump/workspace\"|WORKSPACE = \"$WORKSPACE\"|g" \
-        "$WORKSPACE/4.包管理/下载包/generate_tasks.py"
+    # 创建下载目录
+    mkdir -p "$dl_dir"
 
     echo -e "${YELLOW}生成下载任务...${NC}"
-    cd "$WORKSPACE/4.包管理/下载包"
-    python3 generate_tasks.py
 
-    if [[ -f "download_tasks.json" ]]; then
-        echo -e "${GREEN}✅ 下载任务已生成: download_tasks.json${NC}"
+    # 生成任务
+    python3 "$gen_script" --crash-data "$filtered_csv" --workspace "$WORKSPACE"
 
-        # 询问是否下载
+    local tasks_file="$WORKSPACE/4.包管理/downloads/download_tasks.json"
+
+    if [[ -f "$tasks_file" ]]; then
+        echo -e "${GREEN}✅ 下载任务已生成: $tasks_file${NC}"
         echo ""
-        read -p "是否下载包？(y/n): " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            cp "$dl_script" .
-            python3 scan_and_download.py --batch download_tasks.json
-            echo -e "${GREEN}✅ 包下载完成${NC}"
+
+        # 提取高优先级任务数量
+        local high_count=$(jq '[.tasks[] | select(.priority == "high")] | length' "$tasks_file" 2>/dev/null || echo "0")
+
+        if [[ "$high_count" -gt 0 ]]; then
+            echo -e "${YELLOW}高优先级任务: $high_count 个${NC}"
+
+            # 提取高优先级任务到临时文件
+            jq '[.tasks[] | select(.priority == "high")] | {tasks: .}' "$tasks_file" > "$WORKSPACE/4.包管理/downloads/high_priority_tasks.json"
+
+            # 执行高优先级下载
+            echo -e "${YELLOW}开始下载高优先级包...${NC}"
+            python3 "$dl_script" \
+                --batch "$WORKSPACE/4.包管理/downloads/high_priority_tasks.json" \
+                --download-dir "$dl_dir"
+
+            echo -e "${GREEN}✅ 高优先级包下载完成${NC}"
+        else
+            echo -e "${YELLOW}没有高优先级任务${NC}"
         fi
+
+        # 下载所有任务（中低优先级）
+        echo ""
+        echo -e "${YELLOW}下载中低优先级包...${NC}"
+        python3 "$dl_script" \
+            --batch "$tasks_file" \
+            --download-dir "$dl_dir" &
+
+        echo -e "${GREEN}✅ 包下载任务已提交（后台运行）${NC}"
     fi
 }
 
 # 步骤5: 崩溃分析
 analyze_crashes() {
-    print_step 5 "崩溃分析"
+    print_step 5 "崩溃分析" >&2
 
     local filtered_csv="$1"
     local analyze_script="$SKILLS_DIR/coredump-crash-analysis/scripts/analyze_crash_final.py"
+    local centralized_dir="$SKILLS_DIR/coredump-crash-analysis/centralized"
 
     if [[ ! -f "$analyze_script" ]]; then
         echo -e "${RED}错误: 分析脚本不存在: $analyze_script${NC}"
         exit 1
     fi
 
-    # 复制脚本
-    cp "$analyze_script" "$WORKSPACE/5.崩溃分析/"
-    chmod +x "$WORKSPACE/5.崩溃分析/analyze_crash_final.py"
+    # 设置 PYTHONPATH 包含 centralized 模块路径
+    export PYTHONPATH="$centralized_dir:$PYTHONPATH"
 
     echo -e "${YELLOW}执行崩溃分析...${NC}"
     echo ""
 
     cd "$WORKSPACE/5.崩溃分析"
-    python3 analyze_crash_final.py
+    python3 "$analyze_script" \
+        --workspace "$WORKSPACE" \
+        --package "$PACKAGE" \
+        --csv "$filtered_csv" 2>&1 | head -50 || true
 
     # 生成分析报告
     local report_file="$WORKSPACE/5.崩溃分析/${PACKAGE}_crash_analysis_report.md"
@@ -670,14 +739,13 @@ analyze_crashes() {
 **数据范围**: $START_DATE 至 $END_DATE
 **包名**: $PACKAGE
 
-## 分析结果
-
-分析结果已保存到对应目录，请查看：
+## 目录结构
 
 - 统计报告: \`$WORKSPACE/2.数据筛选/${PACKAGE}_crash_statistics.json\`
 - 筛选数据: \`$WORKSPACE/2.数据筛选/filtered_${PACKAGE}_crash_data.csv\`
 - 源码目录: \`$WORKSPACE/3.代码管理/$PACKAGE\`
 - 下载的包: \`$WORKSPACE/4.包管理/downloads/\`
+- 分析报告: \`$WORKSPACE/5.崩溃分析/\`
 
 ---
 *报告生成时间: $(date '+%Y-%m-%d %H:%M:%S')*
@@ -694,19 +762,106 @@ main() {
     echo "============================================================================="
     echo -e "${NC}"
 
-    # 检查配置完整性（自动触发交互式配置）
+    # 1. 解析命令行参数
+    parse_args "$@"
+
+    # 2. 检查配置完整性
     check_config
 
-    parse_args "$@"
+    # 3. 检查依赖
     check_dependencies
+
+    # 4. 创建工作目录
     setup_workspace
 
-    # 执行5个步骤
+    # 5. 执行分析步骤
+    # 步骤1+2: 数据下载和筛选（只执行一次）
     local csv_file=$(download_data)
     local filtered_csv=$(filter_data "$csv_file")
-    download_source "$filtered_csv"
-    download_packages "$filtered_csv"
-    analyze_crashes "$filtered_csv"
+
+    # 步骤3+4+5: 按版本循环执行
+    # 从版本列表读取每个版本，依次执行：切换代码→下载包→分析崩溃
+    local versions_txt="$WORKSPACE/2.数据筛选/${PACKAGE}_crash_versions.txt"
+    if [[ -f "$versions_txt" ]]; then
+        local version_count=$(wc -l < "$versions_txt")
+        echo -e "${YELLOW}共 ${version_count} 个版本需要分析${NC}"
+        echo ""
+
+        local success_count=0
+        local fail_count=0
+        while IFS= read -r version_line; do
+            [[ -z "$version_line" ]] && continue
+
+            # 版本格式可能是 "5.8.14-1:1101" 或 "5.8.14-1"，取冒号前的部分
+            local version="${version_line%%:*}"
+
+            # 清理版本号（移除 epoch 和 -1 后缀）
+            local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
+
+            echo -e "${BLUE}════════════════════════════════════════════════════════════════════════${NC}"
+            echo -e "${GREEN}处理版本: $version -> $clean_version${NC}"
+            echo -e "${BLUE}════════════════════════════════════════════════════════════════════════${NC}"
+
+            # 步骤3: 切换代码到该版本
+            if download_source_for_version "$PACKAGE" "$clean_version"; then
+                ((success_count++)) || true
+            else
+                ((fail_count++)) || true
+            fi
+
+            # 步骤4: 下载该版本的包
+            if download_packages_for_version "$PACKAGE" "$clean_version"; then
+                ((success_count++)) || true
+            else
+                ((fail_count++)) || true
+            fi
+
+            # 步骤5: 安装包并分析崩溃
+            if analyze_crashes_for_version "$PACKAGE" "$clean_version" "$filtered_csv"; then
+                ((success_count++)) || true
+            else
+                ((fail_count++)) || true
+            fi
+
+            echo ""
+
+        done < "$versions_txt"
+
+        echo -e "${BLUE}════════════════════════════════════════════════════════════════════════${NC}"
+        echo -e "${GREEN}所有版本分析完成${NC}"
+        echo -e "${BLUE}════════════════════════════════════════════════════════════════════════${NC}"
+
+        # 步骤6: 生成统一的总结报告
+        echo ""
+        echo -e "${YELLOW}━━━ 步骤6: 生成总结报告 ━━━${NC}"
+
+        # 生成 version_list.txt（从 crash_versions.txt 转换格式）
+        local version_list_txt="$WORKSPACE/2.数据筛选/version_list.txt"
+        if [[ -f "$versions_txt" ]]; then
+            echo -e "${YELLOW}生成版本清单...${NC}"
+            > "$version_list_txt"
+            while IFS= read -r line; do
+                [[ -z "$line" ]] && continue
+                # 格式: 5.8.14-1:1101 -> 5.8.14-1|1101|medium
+                version="${line%%:*}"
+                count="${line##*:}"
+                echo "${version}|${count}|medium" >> "$version_list_txt"
+            done < "$versions_txt"
+            echo -e "${GREEN}✅ 版本清单已生成: $version_list_txt${NC}"
+        fi
+
+        local final_report_script="$SKILLS_DIR/coredump-full-analysis/scripts/generate_final_report.py"
+        if [[ -f "$final_report_script" ]]; then
+            mkdir -p "$WORKSPACE/7.总结报告"
+            python3 "$final_report_script" \
+                --package "$PACKAGE" \
+                --workspace "$WORKSPACE" \
+                --output-dir "$WORKSPACE/7.总结报告" 2>&1 || true
+            echo -e "${GREEN}✅ 总结报告已生成${NC}"
+        else
+            echo -e "${YELLOW}⚠️ 总结报告脚本不存在: $final_report_script${NC}"
+        fi
+    fi
 
     echo ""
     echo -e "${GREEN}"
@@ -716,7 +871,7 @@ main() {
     echo -e "${NC}"
     echo "📊 统计报告: $WORKSPACE/2.数据筛选/${PACKAGE}_crash_statistics.json"
     echo "📋 筛选数据: $WORKSPACE/2.数据筛选/filtered_${PACKAGE}_crash_data.csv"
-    echo "📄 分析报告: $WORKSPACE/5.崩溃分析/${PACKAGE}_crash_analysis_report.md"
+    echo "📄 分析报告: $WORKSPACE/7.总结报告/"
     echo ""
 }
 

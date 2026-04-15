@@ -25,7 +25,7 @@ cd <workspace>/3.代码管理
 ## 脚本位置
 
 ```bash
-/home/wubw/.nvm/versions/node/v24.14.1/lib/node_modules/openclaw/skills/coredump-code-management/scripts/download_crash_source.sh
+~/.claude/skills/coredump-analysis-skills/coredump-code-management/scripts/download_crash_source.sh
 ```
 
 ## 前置要求
