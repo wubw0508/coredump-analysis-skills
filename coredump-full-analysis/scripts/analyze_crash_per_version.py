@@ -493,9 +493,9 @@ def main():
         print(f"错误: {analysis['error']}")
         sys.exit(1)
 
-    # 输出目录
+    # 输出目录: 5.崩溃分析/<package>/version_xxx/
     version_dir = analysis['version_dir']
-    output_dir = Path(args.workspace) / '5.崩溃分析' / f'version_{version_dir}'
+    output_dir = Path(args.workspace) / '5.崩溃分析' / args.package / f'version_{version_dir}'
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # 保存JSON结果

@@ -57,7 +57,8 @@ def clean_version(version: str) -> str:
 
 def load_version_analyses(workspace: Path, package: str) -> List[Dict]:
     """加载所有版本的分析结果"""
-    analysis_dir = workspace / '5.崩溃分析'
+    # 新目录结构: 5.崩溃分析/<package>/version_xxx/
+    analysis_dir = workspace / '5.崩溃分析' / package
     versions = []
 
     if not analysis_dir.exists():

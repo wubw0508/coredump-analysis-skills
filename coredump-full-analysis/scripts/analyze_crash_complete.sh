@@ -37,6 +37,7 @@ END_DATE="${END_DATE:-}"
 SYS_VERSION="${SYS_VERSION:-1070-1075}"
 ARCH="${ARCH:-x86}"
 WORKSPACE="${WORKSPACE:-./workspace}"
+PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-180}"  # 进度上报间隔（秒），0表示禁用
 
 # 支持通过环境变量传入账号配置（优先级最高）
 SHUTTLE_USERNAME="${SHUTTLE_USERNAME:-}"
@@ -759,6 +760,48 @@ EOF
     echo -e "${GREEN}✅ 分析报告已生成: $report_file${NC}"
 }
 
+# 进度上报函数
+report_progress() {
+    local elapsed=$1
+    local current_version=$2
+    local processed=$3
+    local total=$4
+    local success=$5
+    local fail=$6
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}[$timestamp] 进度报告 (已运行 ${elapsed}秒)${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}步骤① 数据下载:${NC} 已完成"
+    echo -e "${GREEN}步骤② 数据筛选:${NC} 已完成"
+    echo -e "${GREEN}步骤③ 代码管理:${NC} 已创建分支"
+    echo -e "${GREEN}步骤④ 包管理:${NC} 已下载 deb/dbgsym 包"
+    echo -e "${GREEN}步骤⑤ 崩溃分析:${NC} 正在分析..."
+    echo ""
+    echo -e "  当前版本: ${current_version}"
+    echo -e "  进度: ${processed}/${total} 个版本"
+    echo -e "  成功: ${success}, 失败: ${fail}"
+    echo ""
+
+    # 统计下载目录中的 CSV 文件
+    local download_dir="$WORKSPACE/1.数据下载"
+    if [[ -d "$download_dir" ]]; then
+        local csv_count=$(find "$download_dir" -name "*.csv" 2>/dev/null | wc -l)
+        echo -e "  CSV文件: ${csv_count}个"
+    fi
+
+    # 统计已分析的版本
+    local analysis_dir="$WORKSPACE/5.崩溃分析/$PACKAGE"
+    if [[ -d "$analysis_dir" ]]; then
+        local analyzed_count=$(find "$analysis_dir" -name "analysis.json" 2>/dev/null | wc -l)
+        echo -e "  已分析版本: ${analyzed_count}个"
+    fi
+
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+}
+
 # 主函数
 main() {
     echo -e "${BLUE}"
@@ -794,6 +837,10 @@ main() {
 
         local success_count=0
         local fail_count=0
+        local processed_count=0
+        local ANALYSIS_START_TIME=$(date +%s)
+        local LAST_PROGRESS_TIME=$ANALYSIS_START_TIME
+
         while IFS= read -r version_line; do
             [[ -z "$version_line" ]] && continue
 
@@ -835,15 +882,52 @@ main() {
 
             echo ""
 
+            # 进度上报
+            ((processed_count++)) || true
+            if [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
+                local CURRENT_TIME=$(date +%s)
+                local ELAPSED=$((CURRENT_TIME - ANALYSIS_START_TIME))
+                local INTERVAL_PASSED=$((CURRENT_TIME - LAST_PROGRESS_TIME))
+                if [[ $INTERVAL_PASSED -ge $PROGRESS_INTERVAL ]]; then
+                    report_progress "$ELAPSED" "$clean_version" "$processed_count" "$version_count" "$success_count" "$fail_count"
+                    LAST_PROGRESS_TIME=$CURRENT_TIME
+                fi
+            fi
+
         done < "$versions_txt"
 
         echo -e "${BLUE}════════════════════════════════════════════════════════════════════════${NC}"
         echo -e "${GREEN}所有版本分析完成${NC}"
         echo -e "${BLUE}════════════════════════════════════════════════════════════════════════${NC}"
 
-        # 步骤6: 生成统一的总结报告
+        # 步骤6: 生成完整分析报告和AI分析报告
         echo ""
-        echo -e "${YELLOW}━━━ 步骤6: 生成总结报告 ━━━${NC}"
+        echo -e "${YELLOW}━━━ 步骤6: 生成完整分析报告 ━━━${NC}"
+
+        local full_report_script="$SKILLS_DIR/coredump-full-analysis/scripts/generate_full_report.py"
+        local ai_report_script="$SKILLS_DIR/coredump-full-analysis/scripts/generate_ai_report.py"
+
+        if [[ -f "$full_report_script" ]]; then
+            python3 "$full_report_script" \
+                --package "$PACKAGE" \
+                --workspace "$WORKSPACE" 2>&1
+        else
+            echo -e "${YELLOW}⚠️ 完整报告生成脚本不存在: $full_report_script${NC}"
+        fi
+
+        if [[ -f "$ai_report_script" ]]; then
+            python3 "$ai_report_script" \
+                --package "$PACKAGE" \
+                --workspace "$WORKSPACE" 2>&1
+        else
+            echo -e "${YELLOW}⚠️ AI分析报告生成脚本不存在: $ai_report_script${NC}"
+        fi
+
+        echo -e "${GREEN}✅ 分析报告已生成${NC}"
+
+        # 步骤7: 生成统一的总结报告
+        echo ""
+        echo -e "${YELLOW}━━━ 步骤7: 生成总结报告 ━━━${NC}"
 
         # 生成 version_list.txt（从 crash_versions.txt 转换格式）
         local version_list_txt="$WORKSPACE/2.数据筛选/version_list.txt"

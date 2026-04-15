@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # 默认值
-PACKAGE=""
+PACKAGES=""
 START_DATE=""
 END_DATE=""
 SYS_VERSION="1070-1075"
@@ -30,11 +30,12 @@ ${BLUE}=========================================================================
 =============================================================================${NC}
 
 ${GREEN}用法:${NC}
-    $0 --package <包名> [选项]
+    $0 --packages <包名列表> [选项]
 
 ${GREEN}必需参数:${NC}
-    --package <name>       要分析的包名
-                           例如: dde-session-ui, dde-dock, dde-launcher
+    --packages <names>     要分析的包名（支持多包，逗号分隔）
+                           例如: dde-session-ui
+                           多包: dde-control-center,dde-dock,dde-launcher
 
 ${GREEN}可选参数:${NC}
     --start-date <date>   开始日期 (默认: 7天前)
@@ -52,11 +53,14 @@ ${GREEN}可选参数:${NC}
     --help, -h           显示帮助
 
 ${GREEN}示例:${NC}
-    # 分析 dde-session-ui 最近一个月崩溃 (x86)
-    $0 --package dde-session-ui --start-date 2026-03-14 --end-date 2026-04-14
+    # 分析单个包最近一个月崩溃 (x86)
+    $0 --packages dde-session-ui --start-date 2026-03-14 --end-date 2026-04-14
 
-    # 分析 dde-session-ui arm64 架构
-    $0 --package dde-session-ui --arch arm64 --start-date 2026-03-14 --end-date 2026-04-14
+    # 并行分析多个包
+    $0 --packages dde-control-center,dde-dock,dde-launcher,dde-session-ui,dde-session-shell,startdde,dde-daemon
+
+    # 多包 + 进度监控 (每3分钟报告一次)
+    $0 --packages dde-control-center,dde-dock --progress 180
 
     # 分析 dde-dock 指定版本范围
     $0 --package dde-dock --sys-version 1060-1075
@@ -83,7 +87,13 @@ EOF
 while [[ $# -gt 0 ]]; do
     case $1 in
         --package)
-            PACKAGE="$2"
+            # 兼容单包参数
+            PACKAGES="$2"
+            shift 2
+            ;;
+        --packages)
+            # 支持逗号分隔的多包列表
+            PACKAGES="$2"
             shift 2
             ;;
         --start-date)
@@ -131,8 +141,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 验证必需参数
-if [[ -z "$PACKAGE" ]]; then
-    echo -e "${RED}错误: 必须指定 --package 参数${NC}"
+if [[ -z "$PACKAGES" ]]; then
+    echo -e "${RED}错误: 必须指定 --packages 参数${NC}"
     show_help
     exit 1
 fi
@@ -144,12 +154,17 @@ if [[ -z "$START_DATE" ]]; then
     echo -e "${YELLOW}使用默认日期范围: $START_DATE 至 $END_DATE${NC}"
 fi
 
+# 转换为数组（支持逗号分隔）
+IFS=',' read -ra PACKAGE_ARRAY <<< "$PACKAGES"
+PACKAGE_COUNT=${#PACKAGE_ARRAY[@]}
+
 echo -e "${BLUE}=============================================================================${NC}"
 echo -e "${BLUE}                    崩溃分析 Agent 启动${NC}"
 echo -e "${BLUE}=============================================================================${NC}"
 echo ""
 echo -e "${GREEN}分析参数:${NC}"
-echo "  包名: $PACKAGE"
+echo "  包名: $PACKAGES"
+echo "  待分析包数量: $PACKAGE_COUNT"
 echo "  架构: $ARCH"
 echo "  开始日期: $START_DATE"
 echo "  结束日期: $END_DATE"
@@ -211,65 +226,46 @@ echo -e "${YELLOW}从 accounts.json 写入配置...${NC}"
 python3 "$SETUP_ACCOUNTS_SCRIPT" --config "$CONFIG_FILE" 2>/dev/null || true
 echo -e "${GREEN}✅ 配置已写入${NC}"
 
-# 构建命令
-CMD="cd $HOME/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts && \
-bash analyze_crash_complete.sh \
-    --package $PACKAGE \
-    --arch $ARCH \
-    --start-date $START_DATE \
-    --end-date $END_DATE \
-    --sys-version $SYS_VERSION \
-    --workspace \"$WORKSPACE\" 2>&1"
-
 # 进度报告函数
 report_progress() {
     local elapsed=$1
+    local pkg=$2
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
 
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}[$timestamp] 进度报告 (已运行 ${elapsed}秒)${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-    # 统计下载目录中的CSV文件
-    local download_dir="$WORKSPACE/1.数据下载"
-    if [[ -d "$download_dir" ]]; then
-        local csv_count=$(find "$download_dir" -name "*.csv" 2>/dev/null | wc -l)
-        echo -e "${GREEN}步骤① 数据下载:${NC} 已完成 CSV文件: ${csv_count}个"
-    fi
+    local pkg_index=1
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        echo -e "${GREEN}【${pkg_index}/${PACKAGE_COUNT}】${pkg}${NC}"
 
-    # 统计筛选数据
-    local filtered_file="$WORKSPACE/2.数据筛选/filtered_${PACKAGE}_crash_data.csv"
-    local stats_file="$WORKSPACE/2.数据筛选/${PACKAGE}_crash_statistics.json"
-    if [[ -f "$filtered_file" ]]; then
-        local filtered_lines=$(wc -l < "$filtered_file" 2>/dev/null || echo "0")
-        echo -e "${GREEN}步骤② 数据筛选:${NC} 筛选后记录数: $((filtered_lines - 1))"
-    fi
-    if [[ -f "$stats_file" ]] && command -v jq &> /dev/null; then
-        local unique=$(jq -r '.unique_crashes // .统计摘要.唯一崩溃数 // 0' "$stats_file" 2>/dev/null || echo "未知")
-        local total=$(jq -r '.total_records // .统计摘要.总记录数 // 0' "$stats_file" 2>/dev/null || echo "未知")
-        echo -e "  唯一崩溃数: ${unique}, 总记录数: ${total}"
-    fi
+        # 统计下载目录中的CSV文件
+        local csv_count=$(find "$WORKSPACE/1.数据下载" -name "${pkg}_X86_crash_*.csv" 2>/dev/null | wc -l)
+        echo -e "  步骤① 数据下载: CSV文件: ${csv_count}个"
 
-    # 统计代码管理（已切换的版本）
-    local code_dir="$WORKSPACE/3.代码管理/$PACKAGE"
-    if [[ -d "$code_dir" ]]; then
-        local branches=$(git -C "$code_dir" branch -l 2>/dev/null | wc -l || echo "0")
-        echo -e "${GREEN}步骤③ 代码管理:${NC} 已创建分支: ${branches}个"
-    fi
+        # 统计筛选数据
+        local filtered_file="$WORKSPACE/2.数据筛选/filtered_${pkg}_crash_data.csv"
+        local stats_file="$WORKSPACE/2.数据筛选/${pkg}_crash_statistics.json"
+        if [[ -f "$filtered_file" ]]; then
+            local filtered_lines=$(wc -l < "$filtered_file" 2>/dev/null || echo "0")
+            echo -e "  步骤② 数据筛选: 筛选后记录数: $((filtered_lines - 1))"
+        fi
+        if [[ -f "$stats_file" ]] && command -v jq &> /dev/null; then
+            local unique=$(jq -r '.unique_crashes // .统计摘要.唯一崩溃数 // 0' "$stats_file" 2>/dev/null || echo "未知")
+            local total=$(jq -r '.total_records // .统计摘要.总记录数 // 0' "$stats_file" 2>/dev/null || echo "未知")
+            echo -e "    唯一崩溃: ${unique}, 总记录: ${total}"
+        fi
 
-    # 统计包管理（已下载的包）
-    local pkg_dir="$WORKSPACE/4.包管理/downloads"
-    if [[ -d "$pkg_dir" ]]; then
-        local deb_count=$(find "$pkg_dir" -name "*.deb" 2>/dev/null | wc -l)
-        echo -e "${GREEN}步骤④ 包管理:${NC} 已下载deb包: ${deb_count}个"
-    fi
+        # 统计崩溃分析（已分析的版本）
+        local analysis_dir="$WORKSPACE/5.崩溃分析/${pkg}"
+        if [[ -d "$analysis_dir" ]]; then
+            local version_count=$(find "$analysis_dir" -name "analysis.json" 2>/dev/null | wc -l)
+            echo -e "  步骤⑤ 崩溃分析: 已分析版本: ${version_count}个"
+        fi
 
-    # 统计崩溃分析（已分析的版本）
-    local analysis_dir="$WORKSPACE/5.崩溃分析"
-    if [[ -d "$analysis_dir" ]]; then
-        local version_count=$(find "$analysis_dir" -name "analysis.json" 2>/dev/null | wc -l)
-        echo -e "${GREEN}步骤⑤ 崩溃分析:${NC} 已分析版本: ${version_count}个"
-    fi
+        ((pkg_index++)) || true
+    done
 
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
@@ -280,41 +276,80 @@ is_running() {
     kill -0 "$1" 2>/dev/null
 }
 
+# 启动单个包的崩溃分析
+launch_package() {
+    local pkg="$1"
+    local log_file="/tmp/analysis_${pkg}.log"
+    cd "$HOME/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts"
+    PROGRESS_INTERVAL="$PROGRESS_INTERVAL" bash analyze_crash_complete.sh \
+        --package "$pkg" \
+        --arch "$ARCH" \
+        --start-date "$START_DATE" \
+        --end-date "$END_DATE" \
+        --sys-version "$SYS_VERSION" \
+        --workspace "$WORKSPACE" 2>&1
+}
+
+# 并行启动所有包的分析
 if [[ "$RUN_BACKGROUND" == "true" ]]; then
     echo -e "${YELLOW}后台运行模式${NC}"
-    eval "$CMD" &
-    echo -e "${GREEN}Agent 已启动 (PID: $!)${NC}"
-    echo "使用 'jobs' 查看后台任务"
-elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
-    # 启用进度监控模式
-    echo -e "${YELLOW}启用进度监控 (间隔: ${PROGRESS_INTERVAL}秒)${NC}"
+    echo "并行启动 $PACKAGE_COUNT 个包的分析..."
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        launch_package "$pkg" > "/tmp/analysis_${pkg}.log" 2>&1 &
+        echo -e "${GREEN}✅ $pkg 已启动 (PID: $!)${NC}"
+    done
+    echo ""
+    echo "使用 'jobs' 查看后台任务，或查看各包日志:"
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        echo "  tail -f /tmp/analysis_${pkg}.log  # $pkg"
+    done
 
-    # 启动后台进程
-    eval "$CMD" &
-    MAIN_PID=$!
+elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
+    # 启用进度监控模式：并行启动所有包
+    echo -e "${YELLOW}启用进度监控 (间隔: ${PROGRESS_INTERVAL}秒)${NC}"
+    echo "并行启动 $PACKAGE_COUNT 个包的分析..."
+    echo ""
+
+    declare -a PIDS
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        launch_package "$pkg" > "/tmp/analysis_${pkg}.log" 2>&1 &
+        pid=$!
+        PIDS+=($pid)
+        echo -e "${GREEN}🚀 $pkg 已启动 (PID: $pid)${NC}"
+    done
 
     # 初始化
     START_TIME=$(date +%s)
     LAST_REPORT_TIME=$START_TIME
 
-    # 监控循环
-    while is_running $MAIN_PID; do
+    # 监控循环：检查所有进程是否结束
+    any_running() {
+        for pid in "${PIDS[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                return 0
+            fi
+        done
+        return 1
+    }
+
+    while any_running; do
         CURRENT_TIME=$(date +%s)
         ELAPSED=$((CURRENT_TIME - START_TIME))
         INTERVAL_PASSED=$((CURRENT_TIME - LAST_REPORT_TIME))
 
-        # 检查是否需要报告进度
         if [[ $INTERVAL_PASSED -ge $PROGRESS_INTERVAL ]]; then
-            report_progress $ELAPSED
+            report_progress $ELAPSED ""
             LAST_REPORT_TIME=$CURRENT_TIME
         fi
 
         sleep 5  # 每5秒检查一次
     done
 
-    # 等待进程结束
-    wait $MAIN_PID
-    EXIT_CODE=$?
+    # 等待所有进程结束
+    ALL_EXIT_CODE=0
+    for pid in "${PIDS[@]}"; do
+        wait "$pid" || ALL_EXIT_CODE=$?
+    done
 
     # 最终进度报告
     END_TIME=$(date +%s)
@@ -326,28 +361,38 @@ elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
     echo -e "${BLUE}=============================================================================${NC}"
     echo ""
     echo -e "${GREEN}最终状态:${NC}"
-    echo "  退出码: $EXIT_CODE"
     echo "  总耗时: ${TOTAL_ELAPSED}秒 ($(($TOTAL_ELAPSED / 60))分$(($TOTAL_ELAPSED % 60))秒)"
     echo ""
 
-    # 输出最终统计
-    report_progress $TOTAL_ELAPSED
+    report_progress $TOTAL_ELAPSED ""
 
-    # 报告文件位置
     echo -e "${GREEN}输出文件:${NC}"
-    echo "  统计报告: $WORKSPACE/2.数据筛选/${PACKAGE}_crash_statistics.json"
-    echo "  筛选数据: $WORKSPACE/2.数据筛选/filtered_${PACKAGE}_crash_data.csv"
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        echo "  $pkg:"
+        echo "    统计报告: $WORKSPACE/2.数据筛选/${pkg}_crash_statistics.json"
+        echo "    筛选数据: $WORKSPACE/2.数据筛选/filtered_${pkg}_crash_data.csv"
+        echo "    分析报告: $WORKSPACE/5.崩溃分析/${pkg}/"
+    done
     echo "  最终报告: $WORKSPACE/7.总结报告/final_conclusion.md"
 
-    if [[ $EXIT_CODE -eq 0 ]]; then
+    if [[ $ALL_EXIT_CODE -eq 0 ]]; then
         echo ""
-        echo -e "${GREEN}✅ 崩溃分析流程完成！${NC}"
+        echo -e "${GREEN}✅ 所有包崩溃分析流程完成！${NC}"
     else
         echo ""
-        echo -e "${RED}❌ 分析流程异常退出 (退出码: $EXIT_CODE)${NC}"
+        echo -e "${RED}❌ 分析流程异常退出${NC}"
     fi
 
-    exit $EXIT_CODE
+    exit $ALL_EXIT_CODE
+
 else
-    eval "$CMD"
+    # 前台顺序执行
+    PACKAGE_IDX=1
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        echo -e "${BLUE}=============================================================================${NC}"
+        echo -e "${BLUE}  [$PACKAGE_IDX/$PACKAGE_COUNT] 分析包: $pkg${NC}"
+        echo -e "${BLUE}=============================================================================${NC}"
+        launch_package "$pkg"
+        ((PACKAGE_IDX++)) || true
+    done
 fi
