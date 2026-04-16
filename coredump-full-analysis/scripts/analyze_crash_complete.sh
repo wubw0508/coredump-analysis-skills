@@ -612,8 +612,8 @@ download_packages_for_version() {
         -d "$dl_dir" \
         "$package" "$clean_version" 2>&1 || true
 
-    # 直接检查文件是否存在（不使用local避免set -e问题）
-    if [[ -d "$dl_dir" ]] && ls "$dl_dir"/*_${version}_*.deb 1>/dev/null 2>&1; then
+    # 使用 find 检查文件是否存在（避免 ls 在多文件时返回1的问题）
+    if [[ -d "$dl_dir" ]] && [[ -n "$(find "$dl_dir" -maxdepth 1 -name "*_${version}_*.deb" -type f 2>/dev/null)" ]]; then
         echo -e "${GREEN}✅ 包下载完成${NC}"
         return 0
     else
@@ -648,8 +648,9 @@ analyze_crashes_for_version() {
     else
         # 安装该版本的 deb 包（包括调试符号包 dbgsym）
         # 匹配模式: *_{version}_*.deb (如 dde-session-ui_5.8.11-1_amd64.deb, dde-session-ui-dbgsym_5.8.11-1_amd64.deb)
+        # 使用 find 避免 ls 在多文件时返回1的问题
         if [[ -d "$dl_dir" ]]; then
-            local deb_files=$(ls "$dl_dir"/*_${version}_*.deb 2>/dev/null || true)
+            local deb_files=$(find "$dl_dir" -maxdepth 1 -name "*_${version}_*.deb" -type f 2>/dev/null || true)
             if [[ -n "$deb_files" ]]; then
                 echo -e "${YELLOW}安装 deb 包:${NC}"
                 for deb_file in $deb_files; do
