@@ -589,6 +589,7 @@ download_packages_for_version() {
     local version="$2"
     local dl_script="$SKILLS_DIR/coredump-package-management/scripts/scan_and_download.py"
     local dl_dir="$WORKSPACE/4.包管理/downloads"
+    local skipped_versions_file="$WORKSPACE/4.包管理/downloads/skipped_versions.txt"
 
     if [[ ! -f "$dl_script" ]]; then
         echo -e "${RED}错误: 包下载脚本不存在: $dl_script${NC}" >&2
@@ -600,17 +601,26 @@ download_packages_for_version() {
     # 创建下载目录
     mkdir -p "$dl_dir"
 
-    # 清理版本号（用于文件名匹配）
+    # 清理版本号（用于下载）
     local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
 
     # 下载该版本的包和调试符号（使用位置参数格式）
     echo -e "${YELLOW}下载 $package ${clean_version} ...${NC}"
+
+    # 调用下载脚本（忽略其退出码）
     python3 "$dl_script" \
         -d "$dl_dir" \
         "$package" "$clean_version" 2>&1 || true
 
-    echo -e "${GREEN}✅ 包下载完成${NC}"
-    return 0
+    # 直接检查文件是否存在（不使用local避免set -e问题）
+    if [[ -d "$dl_dir" ]] && ls "$dl_dir"/*_${version}_*.deb 1>/dev/null 2>&1; then
+        echo -e "${GREEN}✅ 包下载完成${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠️ 未找到 $package $clean_version 的包（精确版本不匹配），跳过${NC}"
+        echo "$package $clean_version (精确版本不匹配)" >> "$skipped_versions_file"
+        return 1
+    fi
 }
 
 # 步骤5: 安装包并分析指定版本的崩溃
@@ -619,6 +629,8 @@ analyze_crashes_for_version() {
     local version="$2"
     local filtered_csv="$3"
     local analyze_script="$SKILLS_DIR/coredump-full-analysis/scripts/analyze_crash_per_version.py"
+    local dl_dir="$WORKSPACE/4.包管理/downloads"
+    local skip_file="$WORKSPACE/4.包管理/downloads/skipped_versions.txt"
 
     if [[ ! -f "$analyze_script" ]]; then
         echo -e "${RED}错误: 分析脚本不存在: $analyze_script${NC}" >&2
@@ -630,13 +642,42 @@ analyze_crashes_for_version() {
     # 清理版本号
     local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
 
-    # 安装该版本的 deb 包（如果存在）
-    local deb_dir="$WORKSPACE/4.包管理/downloads"
-    if [[ -d "$deb_dir" ]]; then
-        local deb_file=$(find "$deb_dir" -name "${package}_${clean_version}_*.deb" -type f 2>/dev/null | head -1)
-        if [[ -n "$deb_file" && -f "$deb_file" ]]; then
-            echo -e "${YELLOW}安装: $deb_file${NC}"
-            sudo dpkg -i "$deb_file" 2>&1 || true
+    # 检查是否该版本被跳过（deb包不存在）
+    if [[ -f "$skip_file" ]] && grep -q "^$package $clean_version" "$skip_file" 2>/dev/null; then
+        echo -e "${YELLOW}⚠️ 该版本 deb 包不存在，跳过安装，直接使用 AI 分析${NC}"
+    else
+        # 安装该版本的 deb 包（包括调试符号包 dbgsym）
+        # 匹配模式: *_{version}_*.deb (如 dde-session-ui_5.8.11-1_amd64.deb, dde-session-ui-dbgsym_5.8.11-1_amd64.deb)
+        if [[ -d "$dl_dir" ]]; then
+            local deb_files=$(ls "$dl_dir"/*_${version}_*.deb 2>/dev/null || true)
+            if [[ -n "$deb_files" ]]; then
+                echo -e "${YELLOW}安装 deb 包:${NC}"
+                for deb_file in $deb_files; do
+                    if [[ -f "$deb_file" ]]; then
+                        echo -e "  安装: $(basename "$deb_file")${NC}"
+                        if [[ -n "$SUDO_PASSWORD" ]]; then
+                            # 使用 expect 自动输入密码，避免 sudo requiretty 问题
+                            # 匹配中英文密码提示: "password" 或 "请输入密码"
+                            expect -c "
+set deb_file \"$deb_file\"
+set sudo_pass \"$SUDO_PASSWORD\"
+spawn sudo dpkg -i \$deb_file
+expect {
+    -re \"(password|请输入密码)\" {
+        send \"\$sudo_pass\r\"
+        expect eof
+    }
+    eof {
+        exit 0
+    }
+}
+" 2>&1 || true
+                        else
+                            sudo dpkg -i "$deb_file" 2>&1 || true
+                        fi
+                    fi
+                done
+            fi
         fi
     fi
 

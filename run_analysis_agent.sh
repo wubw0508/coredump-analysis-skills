@@ -198,6 +198,7 @@ export SHUTTLE_PASSWORD=$(jq -r '.shuttle.account.password' "$CONFIG_FILE")
 export GERRIT_USERNAME=$(jq -r '.gerrit.account.username' "$CONFIG_FILE")
 export GERRIT_PASSWORD=$(jq -r '.gerrit.account.password' "$CONFIG_FILE")
 export GERRIT_SSH_KEY=$(eval echo $(jq -r '.gerrit.ssh_key // "~/.ssh/id_rsa"' "$CONFIG_FILE"))
+export SUDO_PASSWORD=$(jq -r '.system.sudo_password' "$CONFIG_FILE")
 
 # 检查是否有占位符（未配置）
 PLACEHOLDER_PATTERN="在此处输入"
@@ -281,7 +282,7 @@ launch_package() {
     local pkg="$1"
     local log_file="/tmp/analysis_${pkg}.log"
     cd "$HOME/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts"
-    PROGRESS_INTERVAL="$PROGRESS_INTERVAL" bash analyze_crash_complete.sh \
+    SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" bash analyze_crash_complete.sh \
         --package "$pkg" \
         --arch "$ARCH" \
         --start-date "$START_DATE" \
