@@ -38,6 +38,13 @@ COREDUMP_SKILLS = [
     "coredump-full-analysis",
 ]
 
+# Additional components to bundle
+BUNDLE_COMPONENTS = [
+    "agent",
+    "package_skills.py",
+    "install_skill.py",
+]
+
 
 def should_exclude(rel_path: Path) -> bool:
     """Check if a path should be excluded from packaging."""
@@ -155,6 +162,66 @@ def package_all_skills(base_dir: Path, output_dir: Optional[Path] = None) -> lis
     return results
 
 
+def package_bundle(base_dir: Path, output_dir: Optional[Path] = None) -> Optional[Path]:
+    """
+    Package everything (all skills + agent + tools) as a single .skill bundle.
+
+    This creates a complete distribution that includes:
+    - All 6 skills
+    - The agent (coredump-analysis-agent.md)
+    - Packaging tools (package_skills.py, install_skill.py)
+    """
+    bundle_name = "coredump-analysis-skills-bundle"
+    output_path = output_dir or base_dir
+    bundle_file = output_path / f"{bundle_name}.skill"
+
+    print(f"\n📦 Creating complete bundle: {bundle_name}")
+    print(f"   Includes: 6 skills + agent + packaging tools")
+
+    try:
+        file_count = 0
+        with zipfile.ZipFile(bundle_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Package all skills
+            for skill_name in COREDUMP_SKILLS:
+                skill_path = base_dir / skill_name
+                if not skill_path.exists():
+                    print(f"  ⚠️  Skipping {skill_name} (not found)")
+                    continue
+                for file_path in skill_path.rglob('*'):
+                    if not file_path.is_file():
+                        continue
+                    arcname = file_path.relative_to(base_dir)
+                    if should_exclude(arcname):
+                        continue
+                    zipf.write(file_path, arcname)
+                    file_count += 1
+
+            # Package agent
+            agent_path = base_dir / "agent"
+            if agent_path.exists():
+                for file_path in agent_path.rglob('*'):
+                    if not file_path.is_file():
+                        continue
+                    arcname = file_path.relative_to(base_dir)
+                    zipf.write(file_path, arcname)
+                    file_count += 1
+
+            # Package tools
+            for tool in ["package_skills.py", "install_skill.py"]:
+                tool_path = base_dir / tool
+                if tool_path.exists():
+                    zipf.write(tool_path, Path(tool))
+                    file_count += 1
+
+        size_kb = bundle_file.stat().st_size / 1024
+        print(f"  ✅ Bundled {file_count} files → {bundle_name}.skill ({size_kb:.1f} KB)")
+        return bundle_file
+
+    except Exception as e:
+        print(f"  ❌ Error creating bundle: {e}")
+        return None
+
+
 def list_skills(base_dir: Path):
     """List all available coredump skills."""
     print("\n📦 Available Coredump Skills:")
@@ -185,6 +252,15 @@ def main():
     if "--list" in args:
         list_skills(base_dir)
         sys.exit(0)
+
+    if "--bundle" in args:
+        # Package everything as a single bundle
+        output_dir = None
+        if "--output" in args:
+            idx = args.index("--output")
+            output_dir = Path(args[idx + 1]) if idx + 1 < len(args) else None
+        result = package_bundle(base_dir, output_dir)
+        sys.exit(0 if result else 1)
 
     if "--all" in args:
         # Package all skills

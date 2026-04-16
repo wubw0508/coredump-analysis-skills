@@ -102,7 +102,11 @@ python3 analyze_crash_final.py --package dde-dock
 # 列出所有可用技能
 python3 package_skills.py --list
 
-# 打包所有技能
+# 打包完整套装（推荐）
+# 包含 6 个 skills + agent + 打包工具
+python3 package_skills.py --bundle
+
+# 打包所有技能（各自独立）
 python3 package_skills.py --all
 
 # 打包单个技能
@@ -122,12 +126,22 @@ python3 install_skill.py coredump-data-filter.skill
 python3 install_skill.py /path/to/skills/ --batch
 ```
 
+### 分发文件
+
+| 文件 | 大小 | 说明 |
+|------|------|------|
+| `coredump-analysis-skills-bundle.skill` | ~172 KB | 完整套装（推荐） |
+| `coredump-*.skill` | ~5-98 KB | 各技能独立打包 |
+
+**推荐使用完整套装** (`--bundle`)，包含所有 skills 和 agent，可独立完整运行。
+
 ### .skill 文件格式
 
 `.skill` 文件是 ZIP 压缩包，包含技能目录结构：
 - SKILL.md（必需）
 - scripts/（可选）
 - references/（可选）
+- agent/（完整套装包含）
 
 ### 打包规则
 
