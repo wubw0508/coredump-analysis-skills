@@ -92,12 +92,55 @@ python3 analyze_crash_final.py --package dde-dock
   Metabase     堆栈签名    Gerrit     Shuttle     GDB/addr2line
 ```
 
+## 技能打包与安装
+
+将技能打包成分发文件，或从 .skill 文件安装技能。
+
+### 打包技能
+
+```bash
+# 列出所有可用技能
+python3 package_skills.py --list
+
+# 打包所有技能
+python3 package_skills.py --all
+
+# 打包单个技能
+python3 package_skills.py coredump-data-filter
+```
+
+### 安装技能
+
+```bash
+# 查看 .skill 文件内容
+python3 install_skill.py coredump-data-filter.skill --list
+
+# 安装 .skill 文件
+python3 install_skill.py coredump-data-filter.skill
+
+# 批量安装目录中的所有 .skill 文件
+python3 install_skill.py /path/to/skills/ --batch
+```
+
+### .skill 文件格式
+
+`.skill` 文件是 ZIP 压缩包，包含技能目录结构：
+- SKILL.md（必需）
+- scripts/（可选）
+- references/（可选）
+
+### 打包规则
+
+以下文件会被自动排除：`__pycache__`、`.git`、`.pyc`、`.log`、`accounts.json`
+
 ## 目录结构
 
 ```
 coredump-analysis-skills/
 ├── accounts.json                          # 账号配置文件（必需）
 ├── run_analysis_agent.sh                   # 一键分析入口脚本
+├── package_skills.py                      # 打包技能为 .skill 文件
+├── install_skill.py                       # 从 .skill 文件安装技能
 ├── coredump-data-download/       # 数据下载
 ├── coredump-data-filter/         # 数据筛选去重
 ├── coredump-code-management/     # 源码管理
