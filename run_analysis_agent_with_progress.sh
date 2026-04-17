@@ -13,13 +13,18 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# 生成带时间戳的workspace路径
+generate_workspace_with_timestamp() {
+    echo "$HOME/coredump-workspace-$(date +%Y%m%d_%H%M%S)"
+}
+
 # 默认值
 PACKAGE=""
 START_DATE=""
 END_DATE=""
 SYS_VERSION="1070-1075"
 ARCH="x86"
-WORKSPACE="$HOME/coredump-workspace"
+WORKSPACE=$(generate_workspace_with_timestamp)
 PROGRESS_INTERVAL=180  # 3分钟 = 180秒
 
 # 显示帮助
@@ -40,7 +45,7 @@ ${GREEN}可选参数:${NC}
     --end-date <date>     结束日期 (默认: 今天)
     --sys-version <ver>   系统版本范围 (默认: 1070-1075)
     --arch <arch>         架构 (默认: x86)
-    --workspace <dir>     工作目录 (默认: ~/coredump-workspace)
+    --workspace <dir>     工作目录 (默认: ~/coredump-workspace-YYYYMMDD_HHMMSS)
     --interval <seconds>  进度报告间隔 (默认: 180秒)
     --help, -h           显示帮助
 

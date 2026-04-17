@@ -12,13 +12,18 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# 生成带时间戳的workspace路径
+generate_workspace_with_timestamp() {
+    echo "$HOME/coredump-workspace-$(date +%Y%m%d_%H%M%S)"
+}
+
 # 默认值
 PACKAGES=""
 START_DATE=""
 END_DATE=""
 SYS_VERSION="1070-1075"
 ARCH="x86"
-WORKSPACE="$HOME/coredump-workspace"
+WORKSPACE=$(generate_workspace_with_timestamp)
 RUN_BACKGROUND=false
 PROGRESS_INTERVAL=0  # 0表示禁用进度监控，非0表示启用(秒)
 
@@ -46,7 +51,7 @@ ${GREEN}可选参数:${NC}
                            例如: 1070, 1070-1075, 1070-1075
     --arch <arch>        架构 (默认: x86)
                            例如: x86, x86_64, arm64
-    --workspace <dir>      工作目录 (默认: ~/coredump-workspace)
+    --workspace <dir>      工作目录 (默认: ~/coredump-workspace-YYYYMMDD_HHMMSS)
     --background          后台运行
     --progress [秒]       启用进度监控 (默认: 180秒)
     --interval <秒>       进度报告间隔 (默认: 180秒)

@@ -19,7 +19,11 @@ import glob
 import argparse
 
 # 配置
-DEFAULT_WORKSPACE = os.getcwd()
+def generate_workspace_with_timestamp():
+    """生成带时间戳的workspace路径"""
+    return os.path.expanduser(f"~/coredump-workspace-{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+DEFAULT_WORKSPACE = generate_workspace_with_timestamp()
 
 # ============================================================
 # 版本 TAG 映射表

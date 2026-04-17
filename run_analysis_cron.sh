@@ -7,8 +7,13 @@
 
 set -e
 
+# 生成带时间戳的workspace路径
+generate_workspace_with_timestamp() {
+    echo "$HOME/coredump-workspace-$(date +%Y%m%d_%H%M%S)"
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE="$HOME/coredump-workspace"
+WORKSPACE=$(generate_workspace_with_timestamp)
 DESKTOP_DIR="$HOME/Desktop"
 REPORT_DIR="$WORKSPACE/7.总结报告"
 
