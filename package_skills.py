@@ -170,13 +170,24 @@ def package_bundle(base_dir: Path, output_dir: Optional[Path] = None) -> Optiona
     - All 6 skills
     - The agent (coredump-analysis-agent.md)
     - Packaging tools (package_skills.py, install_skill.py)
+    - Run scripts (run_analysis_*.sh)
+    - Documentation (README.md)
     """
     bundle_name = "coredump-analysis-skills-bundle"
     output_path = output_dir or base_dir
     bundle_file = output_path / f"{bundle_name}.skill"
 
+    # Additional files to include in bundle
+    BUNDLE_EXTRA_FILES = [
+        "README.md",
+        "run_analysis_agent.sh",
+        "run_analysis_agent_with_progress.sh",
+        "run_analysis_cron.sh",
+        "accounts.json",  # Template (user should edit after install)
+    ]
+
     print(f"\n📦 Creating complete bundle: {bundle_name}")
-    print(f"   Includes: 6 skills + agent + packaging tools")
+    print(f"   Includes: 6 skills + agent + scripts + docs")
 
     try:
         file_count = 0
@@ -211,6 +222,13 @@ def package_bundle(base_dir: Path, output_dir: Optional[Path] = None) -> Optiona
                 tool_path = base_dir / tool
                 if tool_path.exists():
                     zipf.write(tool_path, Path(tool))
+                    file_count += 1
+
+            # Package extra files (scripts, docs, config template)
+            for fname in BUNDLE_EXTRA_FILES:
+                fpath = base_dir / fname
+                if fpath.exists():
+                    zipf.write(fpath, Path(fname))
                     file_count += 1
 
         size_kb = bundle_file.stat().st_size / 1024
