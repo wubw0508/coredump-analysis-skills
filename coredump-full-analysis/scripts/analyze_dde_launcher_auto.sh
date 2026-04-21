@@ -17,7 +17,7 @@ NC='\033[0m'
 # 路径配置
 WORKSPACE="/home/wubw/workspace"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILLS_DIR="/home/wubw/skills"
+SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
 PKG_DOWNLOAD_DIR="$WORKSPACE/4.包管理/下载包/downloads"
 REPORT_FILE="$WORKSPACE/5.崩溃分析/dde-launcher_crash_analysis_report.md"
 FILTERED_CSV="$WORKSPACE/2.数据筛选/filtered_dde-launcher_crash_data.csv"

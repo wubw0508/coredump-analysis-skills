@@ -7,7 +7,7 @@ Usage:
     python3 install_skill.py /path/to/coredump-data-download.skill
 
     # Install to custom directory
-    python3 install_skill.py /path/to/coredump-data-download.skill --target ~/.claude/skills
+    python3 install_skill.py /path/to/coredump-data-download.skill --target ~/.openclaw/skills
 
     # List contents without installing
     python3 install_skill.py /path/to/coredump-data-download.skill --list

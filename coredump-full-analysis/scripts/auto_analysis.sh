@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-SKILLS_DIR="/home/wubw/.nvm/versions/node/v24.14.1/lib/node_modules/openclaw/skills"
+SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
 
 DEFAULT_WORKSPACE="./coredump_workspace"
 DEFAULT_PACKAGE=""

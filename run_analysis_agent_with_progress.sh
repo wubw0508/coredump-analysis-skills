@@ -192,7 +192,7 @@ is_running() {
 echo -e "${YELLOW}启动崩溃分析...${NC}"
 
 # 构建命令
-CMD="cd $HOME/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts && \
+CMD="cd $HOME/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts && \
 bash analyze_crash_complete.sh \
     --package $PACKAGE \
     --arch $ARCH \

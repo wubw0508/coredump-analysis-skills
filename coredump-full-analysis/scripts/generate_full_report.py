@@ -122,6 +122,7 @@ def main():
             lines.append("")
 
     report_file = analysis_dir / 'full_analysis_report.md'
+    analysis_dir.mkdir(parents=True, exist_ok=True)
     report_file.write_text(''.join(lines), encoding='utf-8')
     print(f"✅ full_analysis_report.md 已生成: {report_file}")
 

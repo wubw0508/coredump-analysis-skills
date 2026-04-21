@@ -22,6 +22,9 @@ PACKAGES=""
 START_DATE=""
 END_DATE=""
 SYS_VERSION="1070-1075"
+SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
+PACKAGES_FILE="$SKILLS_DIR/packages.txt"
+
 ARCH="x86"
 WORKSPACE=$(generate_workspace_with_timestamp)
 RUN_BACKGROUND=false
@@ -152,7 +155,6 @@ done
 # 验证必需参数
 if [[ -z "$PACKAGES" ]]; then
     # 未指定 --packages，尝试从 packages.txt 读取默认项目列表
-    PACKAGES_FILE="$SKILLS_DIR/packages.txt"
     if [[ -f "$PACKAGES_FILE" ]]; then
         echo -e "${YELLOW}未指定 --packages，从 $PACKAGES_FILE 读取默认项目列表${NC}"
         PACKAGES=$(grep -v '^#' "$PACKAGES_FILE" | grep -v '^$' | tr '\n' ',' | sed 's/,$//')
@@ -170,7 +172,7 @@ fi
 
 # 计算默认日期
 if [[ -z "$START_DATE" ]]; then
-    START_DATE=$(date -d '7 days ago' +%Y-%m-%d)
+    START_DATE=$(date -d "1 month ago" +%Y-%m-%d)
     END_DATE=$(date +%Y-%m-%d)
     echo -e "${YELLOW}使用默认日期范围: $START_DATE 至 $END_DATE${NC}"
 fi
@@ -197,8 +199,8 @@ fi
 echo ""
 
 # 从 accounts.json 读取凭据并写入环境配置
-CONFIG_FILE="$HOME/.claude/skills/coredump-analysis-skills/accounts.json"
-SETUP_ACCOUNTS_SCRIPT="$HOME/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts/setup_accounts.py"
+CONFIG_FILE="$HOME/.openclaw/skills/coredump-analysis-skills/accounts.json"
+SETUP_ACCOUNTS_SCRIPT="$HOME/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts/setup_accounts.py"
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
     echo -e "${RED}错误: 配置文件不存在: $CONFIG_FILE${NC}"
@@ -302,7 +304,7 @@ is_running() {
 launch_package() {
     local pkg="$1"
     local log_file="/tmp/analysis_${pkg}.log"
-    cd "$HOME/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts"
+    cd "$HOME/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts"
     SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" bash analyze_crash_complete.sh \
         --package "$pkg" \
         --arch "$ARCH" \

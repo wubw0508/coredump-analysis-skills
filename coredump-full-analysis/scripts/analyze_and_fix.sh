@@ -17,7 +17,7 @@ NC='\033[0m'
 # 脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$SCRIPT_DIR/../config"
-SKILLS_DIR="/home/wubw/skills"
+SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
 
 # 加载配置
 source "$CONFIG_DIR/local.env" 2>/dev/null || true
