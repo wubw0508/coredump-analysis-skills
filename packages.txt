@@ -1,0 +1,35 @@
+# 全量崩溃分析项目清单
+# 使用说明：
+#   - 全量分析时读取此文件，获取24个默认分析项目列表
+#   - 支持单行注释 (#) 和空行
+#   - 项目之间用换行分隔
+#   - 如果分析命令指定了 --package，则只分析指定项目，忽略此文件
+
+# ============================================================================
+# 项目清单 (共24个)
+# ============================================================================
+
+dde-control-center
+dde-dock
+dde-launcher
+dde-session-ui
+dde-session-shell
+dde-daemon
+dde-api
+dde-clipboard
+startdde
+go-lib
+dde-polkit-agent
+dde-wloutput
+dde-network-core
+deepin-face
+lightdm
+dde-wldpms
+network-manager
+deepin-sound-theme
+ipwatchd
+deepin-authenticate
+deepin-pw-check
+policykit-1
+polkit-qt5-1
+deepin-proxy

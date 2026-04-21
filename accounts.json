@@ -47,8 +47,7 @@
     "sudo_password": "在此处输入当前登录账户密码"
   },
   "paths": {
-    "workspace": "~/coredump-workspace",
-    "code_dir": "~/coredump-workspace/3.代码管理",
-    "download_dir": "~/coredump-workspace/4.包管理/下载包/downloads"
+    "workspace": "",
+    "workspace_comment": "每次分析自动创建带时间戳的目录（~/coredump-workspace-YYYYMMDD-HHMMSS），无需手动配置"
   }
 }

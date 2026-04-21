@@ -7,20 +7,50 @@ description: 一站式崩溃分析自动化流程。组合6个Skills完成从下
 
 一站式崩溃分析自动化流程，组合使用6个Skills完成从下载数据到生成报告的全流程。
 
+## ⚠️ 每次分析前必须检查账号配置
+
+**`accounts.json` 是唯一的账号配置入口**，所有需要人工配置的数据都集中在这里。
+
+**每次崩溃分析启动时，系统自动检查 `accounts.json`**：
+- ✅ 全部配置有效 → 正常执行分析
+- ⚠️ 存在占位符（如"在此处输入"）→ 提示人工配置，返回文件路径并退出
+
+**accounts.json 文件路径**：
+```
+~/.openclaw/skills/coredump-analysis-skills/accounts.json
+```
+
+**如需更新账号**：
+```bash
+python3 coredump-full-analysis/scripts/setup_accounts.py
+```
+
+**必须确认的配置项**：
+| 服务 | 字段 | 说明 |
+|------|------|------|
+| **Shuttle** | `shuttle.account` | 下载 deb/dbgsym 包（https://shuttle.uniontech.com） |
+| **Gerrit** | `gerrit.account` | 克隆源码仓库（https://gerrit.uniontech.com） |
+| **Metabase** | `metabase.account` | 下载崩溃数据（已有默认账号） |
+| **System** | `system.sudo_password` | 安装调试符号包时需要 |
+
+> **重要**：迁移到新机器后、或长时间未使用后，首次分析前务必运行检查命令确认账号是否过期或失效。
+> **paths.workspace** 无需配置，每次分析自动创建带时间戳的目录。
+
+---
+
 ## 目录结构
 
 ```
 coredump-full-analysis/
 ├── SKILL.md                           # 本文件
 ├── scripts/
-│   ├── setup_accounts.py              # 账号配置管理脚本 (新增)
+│   ├── setup_accounts.py              # 账号配置管理脚本
 │   ├── analyze_crash_complete.sh       # 一站式分析脚本
 │   ├── step1_download.sh               # 步骤1: 数据下载
 │   ├── step2_filter.sh                # 步骤2: 数据筛选
 │   ├── step3_source.sh                # 步骤3: 代码管理
 │   ├── step4_packages.sh              # 步骤4: 包管理
 │   └── step5_analyze.sh               # 步骤5: 崩溃分析
-├── accounts.json                      # 账号配置文件 (必需)
 ├── config/                           # 配置文件 (自动生成)
 │   ├── metabase.env                   # Metabase配置
 │   ├── gerrit.env                     # Gerrit配置
@@ -28,29 +58,64 @@ coredump-full-analysis/
 │   ├── package-server.env             # 内部服务器配置
 │   ├── system.env                     # 系统配置
 │   └── local.env                      # 本地路径配置
-├── centralized/
-│   └── accounts.template.json         # 账号配置模板
-└── references/
-    └── ...                            # 参考文档
+└── centralized/
+    └── accounts.template.json         # 账号配置模板
 ```
+
+## 工作目录自动创建
+
+**每次分析自动创建带时间戳的工作目录**，无需手动指定：
+
+```
+~/coredump-workspace-YYYYMMDD-HHMMSS/
+├── 1.数据下载/
+├── 2.数据筛选/
+├── 3.代码管理/
+├── 4.包管理/
+├── 5.崩溃分析/
+├── 6.修复补丁/
+└── 7.总结报告/
+```
+
+- **不指定 `--workspace`** → 自动创建 `~/coredump-workspace-YYYYMMDD-HHMMSS`（推荐）
+- **指定 `--workspace /path`** → 使用指定目录
 
 ## 快速开始
 
-### 0. 使用 Agent（推荐）
-
-使用崩溃分析 Agent，一键执行完整分析流程：
+### 0. 检查账号配置（每次分析前必需）
 
 ```bash
-cd ~/.claude/skills/coredump-analysis-skills
+cd ~/.openclaw/skills/coredump-analysis-skills
+
+# 查看当前账号状态
+python3 coredump-full-analysis/scripts/setup_accounts.py --show
+
+# 如需更新账号
+python3 coredump-full-analysis/scripts/setup_accounts.py
+```
+
+### 1. 一键执行完整分析
+
+```bash
+bash ~/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts/analyze_crash_complete.sh \
+    --package dde-session-shell \
+    --start-date 2026-03-10 \
+    --end-date 2026-04-09 \
+    --sys-version 1070-1075
+```
+
+> 不指定 `--workspace` 时，自动在 `~/` 下创建带时间戳目录（如 `~/coredump-workspace-20260421-094200`）。
+
+### 2. 使用 Agent（推荐）
+
+```bash
+cd ~/.openclaw/skills/coredump-analysis-skills
 
 # 分析 dde-session-ui 最近一个月崩溃 (x86)
 bash run_analysis_agent.sh --package dde-session-ui --start-date 2026-03-14 --end-date 2026-04-14
 
 # 分析 dde-session-ui arm64 架构
 bash run_analysis_agent.sh --package dde-session-ui --arch arm64 --start-date 2026-03-14 --end-date 2026-04-14
-
-# 分析 dde-dock 指定版本范围
-bash run_analysis_agent.sh --package dde-dock --sys-version 1060-1075
 
 # 后台运行
 bash run_analysis_agent.sh --package dde-session-ui --background
@@ -61,72 +126,27 @@ bash run_analysis_agent.sh --package dde-session-ui --background
 - 支持多架构（x86, x86_64, arm64）
 - 支持自定义日期范围、系统版本
 - 后台运行模式
-- 自动使用预设账号
+- 自动使用预设账号（使用前会检查）
 
-### 1. 配置账号信息 (首次使用必需)
+## 账号配置
+
+### 交互式配置
 
 ```bash
-cd ~/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts
 python3 setup_accounts.py
 ```
 
-**交互式配置流程**：
-- 系统会提示输入各服务账号信息
-- 直接回车使用默认值（方括号中的值）
-- 支持的配置项：
-  - **Shuttle**: deb包下载账号
-  - **Metabase**: 崩溃数据下载账号
-  - **Gerrit**: 源码仓库访问账号
-  - **Internal Server**: 内部构建服务器
-  - **System**: sudo密码等系统配置
-  - **Paths**: 工作目录路径配置
+### 非交互式配置
 
-**非交互式配置**：
 ```bash
 # 使用默认配置
 python3 setup_accounts.py --non-interactive
 
 # 从JSON文件加载
-python3 setup_accounts.py --accounts ../centralized/accounts.template.json
-
-# 设置工作目录
-python3 setup_accounts.py --workspace ~/coredump-workspace
+python3 setup_accounts.py --accounts centralized/accounts.template.json
 ```
 
-**显示当前配置**：
-```bash
-python3 setup_accounts.py --show
-```
-
-### 2. 一键执行完整分析
-
-```bash
-bash ~/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts/analyze_crash_complete.sh \
-    --package dde-session-shell \
-    --start-date 2026-03-10 \
-    --end-date 2026-04-09 \
-    --sys-version 1070-1075 \
-    --workspace ~/coredump-workspace
-```
-
-## 配置说明
-
-### 配置文件位置
-
-配置自动生成到 `config/` 目录：
-
-| 文件 | 说明 |
-|------|------|
-| `metabase.env` | Metabase API 认证信息 |
-| `gerrit.env` | Gerrit SSH 和认证信息 |
-| `shuttle.env` | Shuttle API 认证信息 |
-| `package-server.env` | 内部构建服务器地址 |
-| `system.env` | 系统配置 (sudo密码等) |
-| `local.env` | 工作目录路径 |
-
-### 账号配置模板
-
-配置文件模板位于 `centralized/accounts.template.json`：
+### 账号配置模板 (accounts.template.json)
 
 ```json
 {
@@ -164,11 +184,6 @@ bash ~/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts/an
   },
   "system": {
     "sudo_password": ""
-  },
-  "paths": {
-    "workspace": "~/coredump-workspace",
-    "code_dir": "~/coredump-workspace/3.代码管理",
-    "download_dir": "~/coredump-workspace/4.包管理/下载包/downloads"
   }
 }
 ```
@@ -179,17 +194,16 @@ bash ~/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts/an
 |------|---------|--------|
 | **Shuttle** | username, password | - |
 | **Metabase** | username, password | app@deepin.org / deepin123 |
-| **Gerrit** | username | - |
+| **Gerrit** | username, password | - |
 | **Internal Server** | url | http://10.0.32.60:5001 |
 | **System** | sudo_password | 空 |
-| **Paths** | workspace | 当前目录 |
 
 ## 使用方法
 
 ### 方式1: 一键执行（推荐）
 
 ```bash
-bash ~/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts/analyze_crash_complete.sh \
+bash ~/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts/analyze_crash_complete.sh \
     --package dde-session-shell \
     --start-date 2026-04-01 \
     --end-date 2026-04-08
@@ -198,7 +212,7 @@ bash ~/.claude/skills/coredump-analysis-skills/coredump-full-analysis/scripts/an
 ### 方式2: 分步执行
 
 ```bash
-# 步骤1: 下载数据
+# 步骤1: 下载数据（自动创建带时间戳的工作目录）
 bash scripts/step1_download.sh --package dde-session-shell --start-date 2026-04-01 --end-date 2026-04-08
 
 # 步骤2: 筛选数据
@@ -222,7 +236,7 @@ bash scripts/step5_analyze.sh --package dde-session-shell
 | `--start-date <date>` | 开始日期 | 7天前 |
 | `--end-date <date>` | 结束日期 | 今天 |
 | `--sys-version <ver>` | 系统版本 | 1070-1075 |
-| `--workspace <dir>` | 工作目录 | ./workspace |
+| `--workspace <dir>` | 工作目录 | `~/coredump-workspace-YYYYMMDD-HHMMSS`（自动创建） |
 
 ## 6个Skills对应关系
 
@@ -239,8 +253,8 @@ bash scripts/step5_analyze.sh --package dde-session-shell
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  配置账号信息 (首次使用)                                          │
-│  python3 setup_accounts.py                                      │
+│  ⚠️ 检查账号配置 (每次分析前必需)                                  │
+│  python3 setup_accounts.py --show                                │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -285,6 +299,7 @@ bash scripts/step5_analyze.sh --package dde-session-shell
 | `workspace/3.代码管理/<package>/` | 源码仓库 |
 | `workspace/4.包管理/downloads/` | 下载的deb/dbgsym包 |
 | `workspace/5.崩溃分析/<package>_crash_analysis_report.md` | 分析报告 |
+| `workspace/7.总结报告/` | 最终汇总报告 |
 
 ## 统计报告JSON结构
 
@@ -315,11 +330,150 @@ bash scripts/step5_analyze.sh --package dde-session-shell
 }
 ```
 
+## 示例输出
+
+**控制台输出示例**（`analyze_crash_complete.sh`）：
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+步骤 0: 检查配置完整性...
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 检测到环境变量传入的账号配置
+✅ 配置检查通过
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+步骤 1: 创建工作目录
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+当前工作目录: /home/user/coredump-workspace-20260421-100200
+✅ 工作目录已创建: /home/user/coredump-workspace-20260421-100200
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+步骤 2: 下载崩溃数据
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+正在从 Metabase 下载 dde-session-shell 崩溃数据...
+📦 包: dde-session-shell
+📅 日期: 2026-03-10 ~ 2026-04-09
+🏗️ 系统版本: 1070-1075
+📐 架构: x86
+
+下载完成: /home/user/coredump-workspace-20260421-100200/1.数据下载/download_20260421-1002/dde-session-shell_X86_crash_20260421-1002.csv (5501 行)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+步骤 3: 数据筛选与去重
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+正在基于堆栈签名去重...
+共 5501 条崩溃记录 -> 120 条唯一崩溃
+✅ 去重完成！总记录: 5501 | 唯一崩溃: 120 | 去重率: 97.8%
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+步骤 4: 克隆源码仓库
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📥 正在克隆源码仓库...
+Cloning into 'dde-session-shell'...
+Receiving objects: 100% (50000/50000), 50.00 MiB | 10.00 MiB/s
+✅ 源码克隆完成
+🔄 正在切换到版本: 5.7.41.11
+HEAD is now at abc1234 Release 5.7.41.11
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+步骤 5: 下载 deb/dbgsym 包
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📦 正在扫描任务...
+找到: dde-session-shell_5.7.41.11_amd64.deb
+下载中... ████████████████████ 100%
+找到: dde-session-shell-dbgsym_5.7.41.11_amd64.deb
+下载中... ████████████████████ 100%
+✅ 包下载完成 (2 个文件)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+步骤 6: 崩溃分析
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+正在分析 120 个唯一崩溃...
+[1/120] SIGSEGV QWidget::show() - 45次 🔴
+[2/120] SIGABRT QCoreApplication::quit() - 32次 🔴
+...
+✅ 崩溃分析完成
+  应用层崩溃: 85 (可修复)
+  系统库崩溃: 28 (需上游修复)
+  插件崩溃: 7
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 崩溃分析流程完成！
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 统计报告: /home/user/coredump-workspace-20260421-100200/2.数据筛选/dde-session-shell_crash_statistics.json
+📄 分析报告: /home/user/coredump-workspace-20260421-100200/5.崩溃分析/dde-session-shell_crash_analysis_report.md
+📋 总结报告: /home/user/coredump-workspace-20260421-100200/7.总结报告/
+```
+
+**全量总结报告示例**（多项目分析完成后，`7.总结报告/full_analysis_report.md`）：
+```markdown
+# 全量崩溃分析汇总报告
+
+**分析时间**: 2026-04-21
+**分析周期**: 2025-10-20 ~ 2026-04-20
+**分析项目数**: 24个
+
+---
+
+## 📊 总体统计
+
+| 分类 | 数量 |
+|------|------|
+| 有崩溃项目 | 18个 |
+| 无崩溃项目 | 6个 |
+| 唯一崩溃总数 | ~2,287个 |
+| 崩溃记录总数 | ~17,169条 |
+
+---
+
+## 🔴 高优先级项目（崩溃数 > 200）
+
+| 项目 | 唯一崩溃 | 总崩溃 | 主要信号 | 严重程度 |
+|------|----------|--------|----------|----------|
+| dde-dock | 362 | 2000 | SIGSEGV (1898) | 🔴 严重 |
+| dde-session-shell | 345 | 2000 | SIGSEGV (1704) | 🔴 严重 |
+| dde-session-ui | 343 | 2000 | SIGSEGV (1875) | 🔴 严重 |
+| dde-launcher | 312 | 2000 | SIGSEGV (1766) | 🔴 严重 |
+| dde-control-center | 267 | 1083 | SIGSEGV, SIGABRT | 🔴 严重 |
+| network-manager | 270 | 931 | SIGSEGV (791) | 🔴 严重 |
+
+---
+
+## 🔍 可修复性分析
+
+### ✅ 可修复项目
+
+1. dde-dock - SIGSEGV堆栈可追踪
+2. dde-session-shell - SIGSEGV堆栈可追踪
+3. dde-session-ui - SIGSEGV堆栈可追踪
+4. dde-launcher - SIGSEGV堆栈可追踪
+5. dde-control-center - SIGABRT可追踪assert问题
+6. dde-daemon - SIGABRT堆栈可追踪
+
+### ⚠️ 需进一步分析
+
+1. dde-api - SIGBUS可能为第三方库问题
+2. deepin-authenticate - 可能与硬件/驱动相关
+
+---
+
+## 📋 建议修复优先级
+
+### 第一批（立即修复）
+1. dde-wldpms - 单一SIGABRT问题，2000次崩溃
+2. dde-daemon - 1143次SIGABRT，影响桌面核心功能
+3. startdde - 195次单一崩溃点，影响系统启动
+
+### 第二批（近期修复）
+4. dde-dock - 362个唯一崩溃，1898次SIGSEGV
+5. dde-session-shell - 345个唯一崩溃
+6. dde-session-ui - 343个唯一崩溃
+```
+
 ## 注意事项
 
-1. **首次运行**：必须先运行 `python3 setup_accounts.py` 配置账号
-2. **SSH密钥**：确保Gerrit SSH密钥配置正确
-3. **网络要求**：需要访问Metabase、Gerrit、Shuttle服务器
+1. **⚠️ 每次分析前检查账号**：`python3 setup_accounts.py --show`，确认账号密码有效
+2. **SSH密钥**：确保 Gerrit SSH 密钥配置正确（`~/.ssh/id_rsa`）
+3. **网络要求**：需要访问 Metabase、Gerrit、Shuttle 服务器
 4. **磁盘空间**：大数据量可能占用数GB空间
 5. **执行时间**：取决于数据量，通常5-30分钟
 
@@ -335,15 +489,19 @@ chmod +x setup_accounts.py
 - 测试连接: `ssh -T gerrit.uniontech.com`
 
 **Q: 数据下载为空**
-- 检查Metabase配置是否正确
+- 检查 Metabase 配置是否正确
 - 放宽日期范围或系统版本过滤条件
 
 **Q: 包下载失败**
-- 检查Shuttle服务器地址是否可达
+- 检查 Shuttle 服务器地址是否可达
 - 确认账户密码正确
+
+**Q: 账号过期**
+- 运行 `python3 setup_accounts.py` 重新输入账号
+- 检查 `accounts.json` 中是否有占位符文字（如"在此处输入"）
 
 ## 相关文档
 
 - `centralized/accounts.template.json` - 账号配置模板
-- `accounts.json` - 主账号配置文件 (必需)
-- `config/` - 各服务配置文件 (自动生成)
+- `accounts.json` - 主账号配置文件（必需）
+- `config/` - 各服务配置文件（自动生成）

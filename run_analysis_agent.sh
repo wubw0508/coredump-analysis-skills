@@ -41,6 +41,7 @@ ${GREEN}必需参数:${NC}
     --packages <names>     要分析的包名（支持多包，逗号分隔）
                            例如: dde-session-ui
                            多包: dde-control-center,dde-dock,dde-launcher
+                           不指定: 自动从 packages.txt 读取24个默认项目
 
 ${GREEN}可选参数:${NC}
     --start-date <date>   开始日期 (默认: 7天前)
@@ -58,6 +59,9 @@ ${GREEN}可选参数:${NC}
     --help, -h           显示帮助
 
 ${GREEN}示例:${NC}
+    # 全量分析（读取 packages.txt，分析全部24个默认项目）
+    $0
+
     # 分析单个包最近一个月崩溃 (x86)
     $0 --packages dde-session-ui --start-date 2026-03-14 --end-date 2026-04-14
 
@@ -147,9 +151,21 @@ done
 
 # 验证必需参数
 if [[ -z "$PACKAGES" ]]; then
-    echo -e "${RED}错误: 必须指定 --packages 参数${NC}"
-    show_help
-    exit 1
+    # 未指定 --packages，尝试从 packages.txt 读取默认项目列表
+    PACKAGES_FILE="$SKILLS_DIR/packages.txt"
+    if [[ -f "$PACKAGES_FILE" ]]; then
+        echo -e "${YELLOW}未指定 --packages，从 $PACKAGES_FILE 读取默认项目列表${NC}"
+        PACKAGES=$(grep -v '^#' "$PACKAGES_FILE" | grep -v '^$' | tr '\n' ',' | sed 's/,$//')
+        if [[ -z "$PACKAGES" ]]; then
+            echo -e "${RED}错误: packages.txt 为空${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}已加载 $(echo "$PACKAGES" | tr ',' '\n' | wc -l) 个分析项目${NC}"
+    else
+        echo -e "${RED}错误: 必须指定 --packages 参数，且 packages.txt 不存在${NC}"
+        show_help
+        exit 1
+    fi
 fi
 
 # 计算默认日期
