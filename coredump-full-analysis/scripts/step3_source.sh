@@ -1,57 +1,108 @@
 #!/bin/bash
-# 步骤3: 代码管理 - 为每个崩溃版本创建分支并切换
+# 步骤3: 代码管理 - 克隆源码并创建崩溃分支
 # 对应 Skill: coredump-code-management
 
-WORKSPACE="${WORKSPACE:-/home/wubw/Desktop/test}"
-PACKAGE="${1:-dde-session-ui}"
-STATS_FILE="$WORKSPACE/2.数据筛选/${PACKAGE}_crash_statistics.json"
+set -e
 
-echo "=========================================="
-echo "步骤3: 代码管理 - 创建崩溃分支"
-echo "=========================================="
-echo ""
+# 默认值
+PACKAGE=""
+if [[ -z "$WORKSPACE" ]]; then WORKSPACE="$HOME/coredump-workspace-$(date +%Y%m%d-%H%M%S)"; fi
 
-cd "$WORKSPACE/3.代码管理/$PACKAGE"
+# 解析参数
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --package) PACKAGE="$2"; shift 2 ;;
+        --workspace) WORKSPACE="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
 
-# 检查是否在崩溃分支上
-CURRENT_BRANCH=$(git branch --show-current)
-if [[ "$CURRENT_BRANCH" == master ]] || [[ -z "$CURRENT_BRANCH" ]]; then
-    echo "当前在master分支，需要切换到崩溃分支"
-else
-    echo "当前在崩溃分支: $CURRENT_BRANCH"
+if [[ -z "$PACKAGE" ]]; then
+    echo "错误: 必须指定 --package 参数"
+    exit 1
 fi
 
-echo ""
-echo "可用的崩溃分支:"
-git branch | grep crash- || echo "(暂无)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_DIR="$SCRIPT_DIR/../config"
+GERRIT_URL="ssh://ut000168@gerrit.uniontech.com:29418"
 
-echo ""
-echo "=== 崩溃分支使用说明 ==="
-echo ""
-echo "1. 查看所有崩溃分支:"
-echo "   git branch | grep crash-"
-echo ""
-echo "2. 切换到指定崩溃版本分支:"
-echo "   git checkout crash-5_8_14"
-echo ""
-echo "3. 分析完一个版本后，切换到下一个:"
-echo "   git checkout crash-5_7_30"
-echo ""
-echo "4. 回到master:"
-echo "   git checkout master"
-echo ""
-echo "=== 崩溃版本与分支对应关系 ==="
+# 加载配置
+source "$CONFIG_DIR/gerrit.env" 2>/dev/null || true
 
+echo "=========================================="
+echo "步骤3: 代码管理 - 克隆源码"
+echo "=========================================="
+echo "包名: $PACKAGE"
+echo "工作目录: $WORKSPACE"
+echo ""
+
+CODE_DIR="$WORKSPACE/3.代码管理/$PACKAGE"
+
+# 创建目录
+mkdir -p "$CODE_DIR"
+
+# 检查是否已经克隆
+if [[ -d "$CODE_DIR/.git" ]]; then
+    echo "源码已存在，更新中..."
+    cd "$CODE_DIR"
+    git fetch --all 2>/dev/null || true
+    git fetch origin develop/eagle 2>/dev/null || true
+else
+    echo "克隆源码仓库..."
+    cd "$WORKSPACE/3.代码管理"
+    # 尝试克隆
+    if git clone "${GERRIT_URL}/${PACKAGE}.git" "$PACKAGE" 2>/dev/null; then
+        echo "✅ 克隆成功"
+    else
+        echo "⚠️ 克隆失败，尝试从其他源..."
+        # 尝试 https
+        if git clone "https://github.com/linuxdeepin/${PACKAGE}.git" "$PACKAGE" 2>/dev/null; then
+            echo "✅ 从 GitHub 克隆成功"
+        else
+            echo "⚠️ 无法克隆仓库，将创建空目录"
+            mkdir -p "$CODE_DIR"
+        fi
+    fi
+fi
+
+if [[ -d "$CODE_DIR/.git" ]]; then
+    cd "$CODE_DIR"
+    
+    # 切换到 develop/eagle 分支
+    echo ""
+    echo "切换到 develop/eagle 分支..."
+    if git branch -a | grep -q "develop/eagle"; then
+        git checkout develop/eagle 2>/dev/null || git checkout -B develop/eagle origin/develop/eagle 2>/dev/null || true
+    else
+        git checkout -B develop/eagle 2>/dev/null || true
+    fi
+    
+    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "未知")
+    echo "当前分支: $CURRENT_BRANCH"
+    
+    # 显示最近提交
+    echo ""
+    echo "最近5次提交:"
+    git log --oneline -5 2>/dev/null || echo "无提交记录"
+fi
+
+STATS_FILE="$WORKSPACE/2.数据筛选/${PACKAGE}_crash_statistics.json"
 if [[ -f "$STATS_FILE" ]]; then
-    python3 << EOF
+    echo ""
+    echo "=== 崩溃版本分布 ==="
+    python3 - "$STATS_FILE" << 'PYEOF'
 import json
-with open("$STATS_FILE") as f:
-    stats = json.load(f)
-for version, count in list(stats.get('by_version', {}).items())[:10]:
-        branch = "crash-" + version.replace('.', '_')
-        print(f"  {version}: {branch} ({count}次崩溃)")
-EOF
+import sys
+try:
+    with open(sys.argv[1]) as f:
+        stats = json.load(f)
+    for version, count in list(stats.get('by_version', {}).items())[:10]:
+        print(f"  {version}: {count}次崩溃")
+except:
+    pass
+PYEOF
 fi
 
 echo ""
 echo "✅ 步骤3完成"
+echo "源码目录: $CODE_DIR"

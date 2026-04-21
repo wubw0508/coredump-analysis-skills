@@ -24,7 +24,10 @@ PACKAGE="${PACKAGE:-}"
 START_DATE="${START_DATE:-}"
 END_DATE="${END_DATE:-}"
 SYS_VERSION="${SYS_VERSION:-1070-1075}"
-WORKSPACE="${WORKSPACE:-.}"
+# 如果未指定 WORKSPACE，自动创建带时间戳的目录
+if [[ -z "$WORKSPACE" ]] || [[ "$WORKSPACE" == "./workspace" ]]; then
+    WORKSPACE="$HOME/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
+fi
 
 # 帮助信息
 show_help() {
@@ -40,7 +43,7 @@ ${GREEN}选项:${NC}
     --start-date <date>   开始日期（格式: YYYY-MM-DD）
     --end-date <date>     结束日期（格式: YYYY-MM-DD）
     --sys-version <ver>   系统版本范围（默认: 1070-1075）
-    --workspace <dir>      工作目录（默认: ./workspace）
+    --workspace <dir>      工作目录（默认: 自动创建带时间戳的目录 ~/coredump-workspace-YYYYMMDD-HHMMSS）
     --help, -h            显示此帮助信息
 
 ${GREEN}示例:${NC}

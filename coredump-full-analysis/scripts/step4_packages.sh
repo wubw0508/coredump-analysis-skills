@@ -4,12 +4,13 @@
 
 set -e
 
-SKILLS_DIR="/home/wubw/skills/coredump-package-management/scripts"
-CONFIG_DIR="/home/wubw/skills/coredump-full-analysis/config"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILLS_DIR="$SCRIPT_DIR/../../coredump-package-management/scripts"
+CONFIG_DIR="$SCRIPT_DIR/../config"
 
 # 默认值
 PACKAGE="${PACKAGE:-}"
-WORKSPACE="${WORKSPACE:-./workspace}"
+if [[ -z "$WORKSPACE" ]]; then WORKSPACE="$HOME/coredump-workspace-$(date +%Y%m%d-%H%M%S)"; fi
 
 # 解析参数
 while [[ $# -gt 0 ]]; do
@@ -41,13 +42,42 @@ echo ""
 cd "$WORKSPACE/4.包管理/下载包"
 
 # 复制脚本
-cp "$SKILLS_DIR/generate_tasks.py" .
-cp "$SKILLS_DIR/scan_and_download.py" .
+if [[ -f "$SKILLS_DIR/generate_tasks.py" ]]; then
+    cp "$SKILLS_DIR/generate_tasks.py" .
+fi
+if [[ -f "$SKILLS_DIR/scan_and_download.py" ]]; then
+    cp "$SKILLS_DIR/scan_and_download.py" .
+fi
 
 # 生成下载任务（基于统计数据）
-if [[ -f "../../2.数据筛选/${PACKAGE}_stats.json" ]]; then
+STATS_FILE="../../2.数据筛选/${PACKAGE}_crash_statistics.json"
+if [[ -f "$STATS_FILE" ]]; then
     echo "从统计数据生成下载任务..."
-    # 这里简化为生成Top版本的任务
+    python3 - "$PACKAGE" "$STATS_FILE" << 'PYEOF'
+import json
+import sys
+package = sys.argv[1]
+stats_file = sys.argv[2]
+try:
+    with open(stats_file) as f:
+        stats = json.load(f)
+    top_versions = list(stats.get('by_version', {}).keys())[:5]
+except:
+    top_versions = ["5.8.14-1", "5.7.30-1", "5.8.12-1"]
+task = {
+    "package": package,
+    "versions": top_versions,
+    "arch": "amd64",
+    "type": ["deb", "dbgsym"]
+}
+with open('download_tasks.json', 'w') as f:
+    json.dump(task, f, indent=2, ensure_ascii=False)
+print(json.dumps(task, indent=2, ensure_ascii=False))
+PYEOF
+    echo ""
+    echo "✅ 下载任务已生成"
+else
+    echo "⚠️ 未找到统计数据: $STATS_FILE"
     cat > download_tasks.json << EOF
 {
   "package": "$PACKAGE",
@@ -56,12 +86,6 @@ if [[ -f "../../2.数据筛选/${PACKAGE}_stats.json" ]]; then
   "type": ["deb", "dbgsym"]
 }
 EOF
-    cat download_tasks.json
-    echo ""
-    echo "✅ 下载任务已生成"
-    echo "提示: 需要Shuttle服务器支持才能下载实际包"
-else
-    echo "⚠️ 未找到统计数据，先执行步骤2生成统计"
 fi
 
 echo ""

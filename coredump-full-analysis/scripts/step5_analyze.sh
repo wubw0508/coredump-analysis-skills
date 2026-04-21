@@ -4,11 +4,12 @@
 
 set -e
 
-SKILLS_DIR="/home/wubw/.nvm/versions/node/v24.14.1/lib/node_modules/openclaw/skills/coredump-crash-analysis/scripts"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILLS_DIR="$SCRIPT_DIR/../../coredump-crash-analysis/scripts"
 
 # 默认值
 PACKAGE="${PACKAGE:-}"
-WORKSPACE="${WORKSPACE:-./workspace}"
+if [[ -z "$WORKSPACE" ]]; then WORKSPACE="$HOME/coredump-workspace-$(date +%Y%m%d-%H%M%S)"; fi
 
 # 解析参数
 while [[ $# -gt 0 ]]; do
@@ -35,8 +36,22 @@ echo ""
 
 cd "$WORKSPACE/5.崩溃分析"
 
-# 复制脚本
-cp "$SKILLS_DIR/analyze_crash_final.py" .
+# 复制分析脚本
+if [[ -f "$SKILLS_DIR/analyze_crash_final.py" ]]; then
+    cp "$SKILLS_DIR/analyze_crash_final.py" .
+else
+    echo "⚠️ 找不到分析脚本: $SKILLS_DIR/analyze_crash_final.py"
+fi
+
+# 读取统计数据
+STATS_FILE="../2.数据筛选/${PACKAGE}_crash_statistics.json"
+STATS_CONTENT=""
+if [[ -f "$STATS_FILE" ]]; then
+    STATS_CONTENT=$(cat "$STATS_FILE")
+fi
+
+# 读取过滤后的崩溃数据
+FILTERED_CSV="../2.数据筛选/filtered_${PACKAGE}_crash_data.csv"
 
 # 生成分析报告
 cat > "${PACKAGE}_crash_analysis_report.md" << EOF
@@ -49,51 +64,128 @@ cat > "${PACKAGE}_crash_analysis_report.md" << EOF
 
 EOF
 
-# 读取统计数据
-if [[ -f "../../2.数据筛选/${PACKAGE}_stats.json" ]]; then
-    cat "../../2.数据筛选/${PACKAGE}_stats.json" >> "${PACKAGE}_crash_analysis_report.md"
+if [[ -n "$STATS_CONTENT" ]]; then
+    echo "$STATS_CONTENT" >> "${PACKAGE}_crash_analysis_report.md"
+else
+    echo '{ "error": "未找到统计数据" }' >> "${PACKAGE}_crash_analysis_report.md"
 fi
+
+cat >> "${PACKAGE}_crash_analysis_report.md" << 'EOF'
+
+## 崩溃分析详情
+
+EOF
+
+# 提取Top崩溃详情
+if [[ -f "$FILTERED_CSV" ]]; then
+    python3 - "$FILTERED_CSV" "$PACKAGE" << 'PYEOF'
+import csv
+import sys
+
+csv_file = sys.argv[1]
+package = sys.argv[2]
+
+try:
+    crashes = []
+    with open(csv_file, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for i, row in enumerate(reader):
+            if i >= 20:
+                break
+            crashes.append(row)
+    
+    if crashes:
+        md = "### Top 20 崩溃记录\n\n"
+        md += "| 排名 | 次数 | 信号 | 版本 | 可执行文件 |\n"
+        md += "|------|------|------|------|------------|\n"
+        for i, r in enumerate(crashes, 1):
+            count = r.get('Count', 1)
+            sig = r.get('Sig', 'N/A')[:30]
+            version = r.get('Version', 'N/A')[:20]
+            exe = r.get('Exe', 'N/A')[:30]
+            md += f"| {i} | {count} | {sig} | {version} | {exe} |\n"
+        
+        # 堆栈信息
+        md += "\n### 堆栈信息示例\n\n"
+        md += "```\n"
+        for i, r in enumerate(crashes[:5], 1):
+            stack = r.get('StackInfo', '无堆栈信息')[:500]
+            md += f"\n--- 崩溃 #{i} (Count: {r.get('Count',1)}) ---\n"
+            md += f"信号: {r.get('Sig','N/A')}\n"
+            md += f"版本: {r.get('Version','N/A')}\n"
+            md += f"堆栈:\n{stack}\n"
+        md += "```\n"
+        
+        print(md)
+except Exception as e:
+    print(f"\n\n*无法解析崩溃数据: {e}*\n")
+PYEOF
+fi >> "${PACKAGE}_crash_analysis_report.md"
 
 cat >> "${PACKAGE}_crash_analysis_report.md" << EOF
 
-## 崩溃分析
+## 修复建议
 
-### 主要问题
+基于以上分析，对 $PACKAGE 的修复建议：
 
-根据统计分析，$PACKAGE 的主要崩溃类型为 **SIGSEGV**（段错误），占比超过90%。
+### 高优先级（崩溃次数最多）
+EOF
 
-### Top 3 崩溃版本
+# 根据统计数据生成具体建议
+python3 - "$PACKAGE" "$STATS_FILE" "$FILTERED_CSV" 2>/dev/null << 'PYEOF'
+import json
+import sys
+import csv
 
-| 排名 | 版本 | 崩溃次数 |
-|------|------|----------|
-| 1 | 5.8.14-1 | 最多 |
-| 2 | 5.7.30-1 | 次之 |
-| 3 | 5.8.12-1 | 第三 |
+package = sys.argv[1]
+stats_file = sys.argv[2]
+filtered_csv = sys.argv[3] if len(sys.argv) > 3 else None
 
-### 建议
+recommendations = []
 
-1. **重点关注版本 5.8.14-1** - 崩溃次数最多，需要优先分析
-2. **SIGSEGV 问题** - 检查内存访问问题，空指针检查
-3. **源码分析** - 使用 GDB 定位具体崩溃位置
+try:
+    with open(stats_file) as f:
+        stats = json.load(f)
+    
+    top_signals = list(stats.get('by_signal', {}).items())[:3]
+    top_versions = list(stats.get('by_version', {}).items())[:3]
+    
+    recommendations.append(f"### 1. 信号类型分析")
+    for sig, count in top_signals:
+        if 'SEGV' in sig:
+            recommendations.append(f"   - **{sig}** ({count}次): 段错误，可能因空指针解引用、内存越界访问、释放后使用等导致。需检查相关指针和数组边界。")
+        elif 'ABRT' in sig:
+            recommendations.append(f"   - **{sig}** ({count}次): 程序异常终止，通常由assert失败、double-free或严重逻辑错误触发。")
+        elif 'BUS' in sig:
+            recommendations.append(f"   - **{sig}** ({count}次): 总线错误，通常由未对齐内存访问或访问不存在内存页面导致。")
+        else:
+            recommendations.append(f"   - **{sig}** ({count}次): 需进一步分析。")
+    
+    recommendations.append(f"\n### 2. 版本分布")
+    for ver, count in top_versions:
+        recommendations.append(f"   - 版本 {ver}: {count}次崩溃")
+    
+    recommendations.append(f"\n### 3. 通用修复方向")
+    recommendations.append("   - 使用 GDB/addr2line 定位具体崩溃文件和行号")
+    recommendations.append("   - 检查空指针解引用（特别是信号处理函数中）")
+    recommendations.append("   - 检查内存分配/释放配对是否正确")
+    recommendations.append("   - 检查多线程竞态条件（如果有）")
+    recommendations.append("   - 检查数组/容器边界访问")
 
-## GDB 分析命令
+except Exception as e:
+    recommendations.append(f"\n*无法生成建议: {e}*")
 
-\`\`\`bash
-# 安装调试符号
-sudo apt-get install ${PACKAGE}-dbgsym
+print('\n'.join(recommendations))
+PYEOF
 
-# 分析崩溃
-gdb /usr/bin/${PACKAGE} -c <coredump_file>
-(gdb) bt full
-(gdb) frame <frame_number>
-\`\`\`
+cat >> "${PACKAGE}_crash_analysis_report.md" << 'EOF'
 
-## 下一步
+### 下一步
 
-1. 下载对应版本的调试符号包
-2. 使用 addr2line 定位崩溃位置
-3. 在源码中查找相关代码
-4. 提交修复建议
+1. 使用 addr2line 定位崩溃的具体文件和行号
+2. 在源码中查找相关代码
+3. 分析崩溃原因并编写修复代码
+4. 提交到 develop/eagle 分支
 
 ---
 *报告生成时间: $(date '+%Y-%m-%d %H:%M:%S')*
@@ -102,4 +194,3 @@ EOF
 echo "✅ 分析报告已生成"
 echo ""
 echo "📄 报告文件: $WORKSPACE/5.崩溃分析/${PACKAGE}_crash_analysis_report.md"
-cat "${PACKAGE}_crash_analysis_report.md"

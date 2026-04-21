@@ -36,7 +36,10 @@ START_DATE="${START_DATE:-}"
 END_DATE="${END_DATE:-}"
 SYS_VERSION="${SYS_VERSION:-1070-1075}"
 ARCH="${ARCH:-x86}"
-WORKSPACE="${WORKSPACE:-./workspace}"
+# 如果未指定 WORKSPACE，自动创建带时间戳的目录
+if [[ -z "$WORKSPACE" ]] || [[ "$WORKSPACE" == "./workspace" ]]; then
+    WORKSPACE="$HOME/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
+fi
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-180}"  # 进度上报间隔（秒），0表示禁用
 
 # 支持通过环境变量传入账号配置（优先级最高）
@@ -310,7 +313,7 @@ ${GREEN}选项:${NC}
                            例如: 1070, 1070-1075
     --arch <arch>         架构（默认: x86）
                            例如: x86, x86_64, arm64
-    --workspace <dir>      工作目录（默认: ./workspace）
+    --workspace <dir>      工作目录（默认: 自动创建带时间戳的目录 ~/coredump-workspace-YYYYMMDD-HHMMSS）
     --help, -h            显示此帮助信息
 
 ${GREEN}示例:${NC}
