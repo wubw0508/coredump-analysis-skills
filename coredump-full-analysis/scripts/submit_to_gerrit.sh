@@ -117,6 +117,70 @@ version_to_dir() {
     echo "$version" | sed 's/\./_/g' | sed 's/+/_/g' | sed 's/-/_/g'
 }
 
+# 解析版本分析目录
+resolve_version_analysis_dir() {
+    local package="$1"
+    local version="$2"
+    local workspace="$3"
+
+    local version_dir
+    version_dir=$(version_to_dir "$(clean_version "$version")")
+
+    local candidates=(
+        "$workspace/5.崩溃分析/$package/version_${version_dir}"
+        "$workspace/5.崩溃分析/version_${version_dir}"
+        "$workspace/5.崩溃分析/$package/${version_dir}"
+        "$workspace/5.崩溃分析/${version_dir}"
+    )
+
+    for dir in "${candidates[@]}"; do
+        if [[ -f "$dir/analysis.json" ]] || [[ -f "$dir/analysis_report.md" ]]; then
+            echo "$dir"
+            return 0
+        fi
+    done
+
+    echo "$workspace/5.崩溃分析/$package/version_${version_dir}"
+}
+
+# 获取版本对应架构
+get_arch_for_version() {
+    local package="$1"
+    local version="$2"
+    local workspace="$3"
+    local filtered_csv="$workspace/2.数据筛选/filtered_${package}_crash_data.csv"
+
+    if [[ ! -f "$filtered_csv" ]]; then
+        echo "unknown"
+        return 0
+    fi
+
+    python3 - "$filtered_csv" "$version" <<'PY'
+import csv, sys
+csv_file, version = sys.argv[1], sys.argv[2]
+version_clean = version
+if version_clean.startswith('1:'):
+    version_clean = version_clean[2:]
+if version_clean.endswith('-1'):
+    version_clean = version_clean[:-2]
+with open(csv_file, encoding='utf-8') as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        row_version = (row.get('Version', '') or '').strip()
+        row_clean = row_version
+        if row_clean.startswith('1:'):
+            row_clean = row_clean[2:]
+        if row_clean.endswith('-1'):
+            row_clean = row_clean[:-2]
+        if row_version == version or row_clean == version_clean:
+            arch = row.get('Arch', '') or row.get('Architecture', '')
+            print(arch or 'unknown')
+            break
+    else:
+        print('unknown')
+PY
+}
+
 # 生成修复分支名
 generate_branch_name() {
     local package="$1"
@@ -168,44 +232,66 @@ generate_commit_message() {
     local version="$2"
     local workspace="$3"
 
-    local analysis_file="$workspace/5.崩溃分析/version_$(version_to_dir "$(clean_version "$version")")/analysis.json"
+    local analysis_dir
+    analysis_dir=$(resolve_version_analysis_dir "$package" "$version" "$workspace")
+    local analysis_file="$analysis_dir/analysis.json"
+    local report_file="$analysis_dir/analysis_report.md"
+    local arch
+    arch=$(get_arch_for_version "$package" "$version" "$workspace")
 
     if [[ ! -f "$analysis_file" ]]; then
-        # 基本的commit message
         cat << EOF
-fix: 修复 $package 版本 $version 中的崩溃问题
+fix($package): 修复崩溃问题
 
 从自动化崩溃分析系统生成的修复补丁。
 
-包: $package
-版本: $version
+包名: $package
+版本号: $version
+架构: $arch
+分析结论: 已根据当前版本分析结果生成修复代码，请结合对应分析报告复核提交内容。
 EOF
         return 0
     fi
 
-    # 从分析结果生成详细的commit message
     local total_crashes=$(jq -r '.summary.total_crash_records' "$analysis_file" 2>/dev/null || echo "0")
     local fixable_count=$(jq -r '.summary.fixable_count' "$analysis_file" 2>/dev/null || echo "0")
+    local unique_crashes=$(jq -r '.summary.unique_crashes' "$analysis_file" 2>/dev/null || echo "0")
+    local recommendations
+    recommendations=$(jq -r '.recommendations[]?' "$analysis_file" 2>/dev/null)
+    local conclusions
+    conclusions=$(jq -r '.crashes[] | select(.fixable == true or .fixable == "uncertain") | .fix_reason' "$analysis_file" 2>/dev/null | sort -u | head -n 5)
+    local representative_stacks
+    representative_stacks=$(jq -r '
+        .crashes[:5][] |
+        "Crash ID: " + (.id // "unknown"),
+        "Signal: " + (.signal // "unknown"),
+        "Count: " + ((.count // 0) | tostring),
+        "App Layer Symbol: " + ((.app_layer_symbol // "") | if . == "" then "N/A" else . end),
+        "Analysis Conclusion: " + ((.fix_reason // "") | if . == "" then "N/A" else . end),
+        "Crash Stack:",
+        ((.stack_info // "") | split("\n")[:8] | join("\n")),
+        ""
+    ' "$analysis_file" 2>/dev/null)
 
     cat << EOF
-fix: 修复 $package 版本 $version 中的崩溃问题
+fix($package): 修复崩溃问题
 
 从自动化崩溃分析系统生成的修复补丁。
 
-## 修复统计
-- 包名: $package
-- 版本: $version
-- 总崩溃记录: $total_crashes
-- 可修复崩溃数: $fixable_count
+包名: $package
+版本号: $version
+架构: $arch
+唯一崩溃数: $unique_crashes
+总崩溃记录数: $total_crashes
+可修复崩溃数: $fixable_count
 
-## 主要修复
+分析结论:
+$(if [[ -n "$conclusions" ]]; then echo "$conclusions"; elif [[ -n "$recommendations" ]]; then echo "$recommendations"; else echo "需要结合分析报告进一步确认"; fi)
 
-$(jq -r '.crashes[] | select(.fixable == true) | "  - " + .signal + ": " + .fix_reason + " (" + (.count | tostring) + "次)"' "$analysis_file" 2>/dev/null || echo "无")
+具体解决崩溃堆栈:
+$(if [[ -n "$representative_stacks" ]]; then echo "$representative_stacks"; else echo "N/A"; fi)
 
-## 详细信息
-已识别到可修复的崩溃模式，已应用相应的修复代码。
-
-崩溃分析报告: 5.崩溃分析/version_$(version_to_dir "$(clean_version "$version")")/analysis_report.md
+分析报告: ${report_file#$workspace/}
 
 Change-Id: I$(date +%Y%m%d%H%M%S%N | md5sum | head -c 40)
 EOF
@@ -277,7 +363,9 @@ submit_to_gerrit() {
     cd "$code_dir"
 
     # 如果有补丁文件，应用补丁
-    local patch_dir="$workspace/5.崩溃分析/version_$(version_to_dir "$(clean_version "$VERSION")")/patches"
+    local analysis_dir
+    analysis_dir=$(resolve_version_analysis_dir "$package" "$VERSION" "$workspace")
+    local patch_dir="$analysis_dir/patches"
     if [[ -d "$patch_dir" ]] && [[ $(ls -A "$patch_dir" 2>/dev/null) ]]; then
         echo -e "${CYAN}应用补丁文件...${NC}"
         for patch in "$patch_dir"/*.patch; do

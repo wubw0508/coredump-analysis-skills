@@ -43,6 +43,12 @@ else
     echo "⚠️ 找不到分析脚本: $SKILLS_DIR/analyze_crash_final.py"
 fi
 
+if [[ -f "$SKILLS_DIR/analyze_blackwidget_crashes.py" ]]; then
+    cp "$SKILLS_DIR/analyze_blackwidget_crashes.py" .
+else
+    echo "⚠️ 找不到 dde-blackwidget 专项分析脚本: $SKILLS_DIR/analyze_blackwidget_crashes.py"
+fi
+
 # 读取统计数据
 STATS_FILE="../2.数据筛选/${PACKAGE}_crash_statistics.json"
 STATS_CONTENT=""
@@ -194,3 +200,32 @@ EOF
 echo "✅ 分析报告已生成"
 echo ""
 echo "📄 报告文件: $WORKSPACE/5.崩溃分析/${PACKAGE}_crash_analysis_report.md"
+
+if [[ "$PACKAGE" == "dde-session-ui" ]] && [[ -f "analyze_blackwidget_crashes.py" ]]; then
+    echo ""
+    echo "=========================================="
+    echo "附加分析: dde-blackwidget 专项分析"
+    echo "=========================================="
+
+    BLACKWIDGET_OUTPUT_DIR="$WORKSPACE/5.崩溃分析/dde-blackwidget专项分析"
+    mkdir -p "$BLACKWIDGET_OUTPUT_DIR"
+
+    SOURCE_CSV=""
+    RAW_CSV_COUNT=$(find "$WORKSPACE/1.数据下载" -name "${PACKAGE}_*crash_*.csv" -type f 2>/dev/null | wc -l)
+    if [[ "$RAW_CSV_COUNT" -gt 0 ]]; then
+        SOURCE_CSV="$WORKSPACE/1.数据下载"
+    elif [[ -f "$FILTERED_CSV" ]]; then
+        SOURCE_CSV="$FILTERED_CSV"
+    fi
+
+    if [[ -n "$SOURCE_CSV" ]] && [[ -e "$SOURCE_CSV" ]]; then
+        echo "使用数据源: $SOURCE_CSV"
+        python3 ./analyze_blackwidget_crashes.py \
+            --csv "$SOURCE_CSV" \
+            --output-dir "$BLACKWIDGET_OUTPUT_DIR"
+        echo ""
+        echo "📄 dde-blackwidget 专项分析目录: $BLACKWIDGET_OUTPUT_DIR"
+    else
+        echo "⚠️ 未找到可用的 dde-session-ui 崩溃 CSV，跳过 dde-blackwidget 专项分析"
+    fi
+fi

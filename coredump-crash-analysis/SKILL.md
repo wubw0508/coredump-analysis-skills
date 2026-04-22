@@ -22,6 +22,7 @@ coredump-crash-analysis/
 ├── SKILL.md                          # 本文件
 ├── scripts/
 │   └── analyze_crash_final.py         # 崩溃分析脚本
+│   └── analyze_blackwidget_crashes.py # dde-blackwidget 专项分析脚本
 ├── centralized/                      # 通用分析模块
 │   ├── __init__.py                   # 包导出
 │   ├── models.py                     # 通用数据模型
@@ -49,6 +50,34 @@ cd ~/.openclaw/skills/coredump-analysis-skills/coredump-crash-analysis/scripts
 python3 analyze_crash_final.py --package dde-dock --workspace ~/coredump-workspace
 ```
 
+### 单独运行 dde-blackwidget 专项分析
+
+适用于 `dde-session-ui` 原始崩溃数据，自动收敛 `dde-blackwidget` 相关记录并生成签名、低频、问题清单。
+支持输入单个 CSV，也支持输入一个目录并递归合并其中多份 CSV。
+
+```bash
+cd ~/.openclaw/skills/coredump-analysis-skills/coredump-crash-analysis/scripts
+python3 analyze_blackwidget_crashes.py \
+    --csv /path/to/dde-session-ui_X86_crash_xxx.csv \
+    --output-dir /tmp/dde-blackwidget-analysis
+
+python3 analyze_blackwidget_crashes.py \
+    --csv /path/to/1.数据下载 \
+    --output-dir /tmp/dde-blackwidget-analysis
+```
+
+输出文件包括：
+
+- `dde-blackwidget_all_records.csv`
+- `signature_summary.csv`
+- `signature_triage_v2.csv`
+- `signature_triage_v3.csv`
+- `lowfreq_resolution_v2.csv`
+- `actionable_issues.csv`
+- `retained_issues.csv`
+- `final_issue_summary.md`
+- `remaining_issue_review_v3.md`
+
 ## 通用模块 (centralized/)
 
 通用崩溃分析模块，可被多个 coredump-* skills 复用。
@@ -68,6 +97,12 @@ python3 analyze_crash_final.py --package dde-dock --workspace ~/coredump-workspa
 
 ```
 读取CSV → 解析堆栈 → 识别信号类型 → 定位关键帧 → 判断崩溃类型 → 关联Gerrit修复 → 生成报告
+```
+
+`dde-blackwidget` 专项分析流程：
+
+```
+读取 dde-session-ui CSV → 收敛 dde-blackwidget 记录 → 生成签名 → 低频记录归类 → 问题分层 → 剩余问题复判 → 输出问题清单
 ```
 
 ## 依赖说明（⚠️ 重要）
