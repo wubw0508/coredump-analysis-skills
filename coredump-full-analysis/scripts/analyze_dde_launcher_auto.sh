@@ -1,10 +1,17 @@
 #!/bin/bash
 #=============================================================================
-# dde-launcher 崩溃分析自动化脚本
-# 自动执行: 筛选数据 → 下载包 → 安装包 → 崩溃分析 → 生成报告
+# Legacy: dde-launcher 崩溃分析自动化脚本
+# 已弃用，保留文件名仅为兼容历史调用与排查旧记录
 #=============================================================================
 
 set -e
+
+echo "错误: $0 已弃用，不再维护。" >&2
+echo "请改用通用入口:" >&2
+echo "  bash run_analysis_agent.sh --packages dde-launcher --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD>" >&2
+echo "或按步骤调用:" >&2
+echo "  bash coredump-full-analysis/scripts/step5_analyze.sh --workspace <workspace> --package dde-launcher" >&2
+exit 1
 
 # 配色
 RED='\033[0;31m'
@@ -24,7 +31,8 @@ FILTERED_CSV="$WORKSPACE/2.数据筛选/filtered_dde-launcher_crash_data.csv"
 STATS_JSON="$WORKSPACE/2.数据筛选/dde-launcher_crash_statistics.json"
 PKG_DIR="$PKG_DOWNLOAD_DIR/dde-launcher"
 
-SUDO_PASSWORD="${SUDO_PASSWORD:-1}"
+source "$SCRIPT_DIR/load_accounts.sh"
+load_accounts_or_die system
 
 echo ""
 echo -e "${BLUE}=============================================================================${NC}"

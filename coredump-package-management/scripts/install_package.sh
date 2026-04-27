@@ -18,12 +18,14 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE="${WORKSPACE:-/home/wubw/workspace}"
+LOAD_ACCOUNTS_SCRIPT="$SKILLS_DIR/coredump-full-analysis/scripts/load_accounts.sh"
 
 # 参数
 PACKAGE="${1:-}"
 VERSION="${2:-}"
 OUTPUT_DIR="${3:-${WORKSPACE}/4.包管理/下载包/downloads}"
-SUDO_PASSWORD="${SUDO_PASSWORD:-1}"
+source "$LOAD_ACCOUNTS_SCRIPT"
+load_accounts_or_die system
 
 show_help() {
     cat << EOF

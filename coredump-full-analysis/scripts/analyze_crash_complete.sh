@@ -1,7 +1,7 @@
 #!/bin/bash
 #=============================================================================
-# dde-dock/dde-control-center 等包的崩溃分析完整流程
-# 组合使用5个Skills进行一站式崩溃分析
+# 通用崩溃分析完整流程
+# 组合使用 5 个 Skills 进行一站式崩溃分析
 #=============================================================================
 
 set -e
@@ -19,16 +19,9 @@ SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
 # 脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$SCRIPT_DIR/../config"
-# 项目根目录账号配置
-PROJECT_ROOT_ACCOUNTS="$SKILLS_DIR/accounts.json"
+LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
 
-# 加载配置
-source "$CONFIG_DIR/metabase.env" 2>/dev/null || true
-source "$CONFIG_DIR/gerrit.env" 2>/dev/null || true
 source "$CONFIG_DIR/package-server.env" 2>/dev/null || true
-source "$CONFIG_DIR/shuttle.env" 2>/dev/null || true
-source "$CONFIG_DIR/system.env" 2>/dev/null || true
-source "$CONFIG_DIR/local.env" 2>/dev/null || true
 
 # 默认值
 PACKAGE="${PACKAGE:-}"
@@ -36,248 +29,88 @@ START_DATE="${START_DATE:-}"
 END_DATE="${END_DATE:-}"
 SYS_VERSION="${SYS_VERSION:-1070-1075}"
 ARCH="${ARCH:-x86}"
-# 如果未指定 WORKSPACE，自动创建带时间戳的目录
-if [[ -z "$WORKSPACE" ]] || [[ "$WORKSPACE" == "./workspace" ]]; then
-    WORKSPACE="$HOME/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
-fi
+SELECTED_VERSIONS="${SELECTED_VERSIONS:-}"
+WORKSPACE="${WORKSPACE:-}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-180}"  # 进度上报间隔（秒），0表示禁用
+SUMMARY_DIR_NAME="6.总结报告"
+VERSION_STATUS_FILE=""
+STEP_STATUS=""
+STEP_MESSAGE=""
 
-# 支持通过环境变量传入账号配置（优先级最高）
-SHUTTLE_USERNAME="${SHUTTLE_USERNAME:-}"
-SHUTTLE_PASSWORD="${SHUTTLE_PASSWORD:-}"
-GERRIT_USERNAME="${GERRIT_USERNAME:-}"
-GERRIT_PASSWORD="${GERRIT_PASSWORD:-}"
+generate_workspace_with_timestamp() {
+    local root_dir="${1:-$HOME}"
+    echo "$root_dir/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
+}
+
+ensure_summary_dir() {
+    mkdir -p "$WORKSPACE/$SUMMARY_DIR_NAME"
+}
+
+init_status_files() {
+    ensure_summary_dir
+    VERSION_STATUS_FILE="$WORKSPACE/$SUMMARY_DIR_NAME/version_status.tsv"
+    if [[ ! -f "$VERSION_STATUS_FILE" ]]; then
+        printf "#timestamp\tpackage\tversion\tstep\tstatus\tmessage\n" > "$VERSION_STATUS_FILE"
+    fi
+}
+
+set_step_result() {
+    STEP_STATUS="$1"
+    STEP_MESSAGE="$2"
+}
+
+log_version_status() {
+    local version="$1"
+    local step="$2"
+    local status="$3"
+    local message="${4:-}"
+    ensure_summary_dir
+    printf "%s\t%s\t%s\t%s\t%s\t%s\n" \
+        "$(date '+%Y-%m-%dT%H:%M:%S')" \
+        "$PACKAGE" \
+        "$version" \
+        "$step" \
+        "$status" \
+        "$message" >> "$VERSION_STATUS_FILE"
+}
+
+version_selected() {
+    local version="$1"
+    local selected="${SELECTED_VERSIONS:-}"
+    if [[ -z "$selected" ]]; then
+        return 0
+    fi
+
+    local normalized
+    normalized=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
+    local candidate
+    IFS=',' read -ra _selected_array <<< "$selected"
+    for candidate in "${_selected_array[@]}"; do
+        candidate=$(echo "$candidate" | xargs)
+        candidate=$(echo "$candidate" | sed 's/^1://' | sed 's/-1$//')
+        if [[ -n "$candidate" && "$candidate" == "$normalized" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
 
 # 检查配置完整性
 check_config() {
     echo -e "${BLUE}检查配置完整性...${NC}"
-
-    # 优先使用项目根目录的 accounts.json，其次使用 config/ 目录
-    local accounts_file=""
-    if [[ -f "$PROJECT_ROOT_ACCOUNTS" ]]; then
-        accounts_file="$PROJECT_ROOT_ACCOUNTS"
-    elif [[ -f "$CONFIG_DIR/accounts.json" ]]; then
-        accounts_file="$CONFIG_DIR/accounts.json"
-    fi
-
-    # 方法1: 检查是否通过环境变量传入了账号
-    if [[ -n "$SHUTTLE_USERNAME" && -n "$SHUTTLE_PASSWORD" && -n "$GERRIT_USERNAME" && -n "$GERRIT_PASSWORD" ]]; then
-        echo -e "${GREEN}✅ 检测到环境变量传入的账号配置${NC}"
-        write_config_from_env
-        return 0
-    fi
-
-    # 方法2: 直接用 jq 检查 accounts.json 配置完整性
-    if [[ -f "$accounts_file" ]] && check_accounts_file "$accounts_file"; then
-        echo -e "${GREEN}✅ 配置检查通过${NC}"
-        # 同步配置到 .env 文件
-        sync_env_from_accounts "$accounts_file"
-        return 0
-    fi
-
-    # 方法3: 配置不完整，提示用户输入
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}检测到缺少必要配置，请输入账号信息${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-
-    prompt_for_accounts
-    write_config_from_env
-    echo -e "${GREEN}✅ 配置已保存${NC}"
-}
-
-# 检查 accounts.json 配置完整性
-check_accounts_file() {
-    local file="$1"
-
-    # 检查 jq 是否可用
-    if ! command -v jq &> /dev/null; then
-        echo -e "${YELLOW}警告: jq 未安装，无法精确检查配置完整性${NC}"
-        return 0
-    fi
-
-    # 检查必需字段是否存在且非占位符
-    local shuttle_user=$(jq -r '.shuttle.account.username // ""' "$file" 2>/dev/null)
-    local shuttle_pass=$(jq -r '.shuttle.account.password // ""' "$file" 2>/dev/null)
-    local gerrit_user=$(jq -r '.gerrit.account.username // ""' "$file" 2>/dev/null)
-    local gerrit_pass=$(jq -r '.gerrit.account.password // ""' "$file" 2>/dev/null)
-
-    # 检查是否包含占位符
-    if [[ "$shuttle_user" == *"请在此输入"* ]] || [[ "$shuttle_pass" == *"请在此输入"* ]] || \
-       [[ "$gerrit_user" == *"请在此输入"* ]] || [[ "$gerrit_pass" == *"请在此输入"* ]]; then
+    if [[ ! -f "$LOAD_ACCOUNTS_SCRIPT" ]]; then
+        echo -e "${RED}错误: 账号加载脚本不存在: $LOAD_ACCOUNTS_SCRIPT${NC}"
         return 1
     fi
-
-    # 检查是否为空
-    if [[ -z "$shuttle_user" ]] || [[ -z "$shuttle_pass" ]] || \
-       [[ -z "$gerrit_user" ]] || [[ -z "$gerrit_pass" ]]; then
-        return 1
+    source "$LOAD_ACCOUNTS_SCRIPT"
+    load_accounts_or_die metabase gerrit shuttle system
+    GERRIT_USERNAME="$GERRIT_USER"
+    if [[ -z "$WORKSPACE" ]] || [[ "$WORKSPACE" == "./workspace" ]]; then
+        local workspace_root="${ACCOUNTS_WORKSPACE_ROOT:-$HOME}"
+        [[ -z "$workspace_root" ]] && workspace_root="$HOME"
+        WORKSPACE="$(generate_workspace_with_timestamp "$workspace_root")"
     fi
-
-    return 0
-}
-
-# 同步配置到 .env 文件
-sync_env_from_accounts() {
-    local file="$1"
-
-    if ! command -v jq &> /dev/null; then
-        return
-    fi
-
-    local shuttle_user=$(jq -r '.shuttle.account.username // ""' "$file")
-    local shuttle_pass=$(jq -r '.shuttle.account.password // ""' "$file")
-    local gerrit_user=$(jq -r '.gerrit.account.username // ""' "$file")
-    local gerrit_pass=$(jq -r '.gerrit.account.password // ""' "$file")
-
-    cat > "$CONFIG_DIR/shuttle.env" << EOF
-# Shuttle 配置
-SHUTTLE_URL="https://shuttle.uniontech.com"
-SHUTTLE_API_URL="https://shuttle.uniontech.com/api/download"
-SHUTTLE_USERNAME="$shuttle_user"
-SHUTTLE_PASSWORD="$shuttle_pass"
-EOF
-
-    cat > "$CONFIG_DIR/gerrit.env" << EOF
-# Gerrit 配置
-GERRIT_HOST="gerrit.uniontech.com"
-GERRIT_PORT="29418"
-GERRIT_USER="$gerrit_user"
-GERRIT_PASSWORD="$gerrit_pass"
-GERRIT_SSH_KEY="$HOME/.ssh/id_rsa"
-EOF
-}
-
-# 提示用户输入账号信息
-prompt_for_accounts() {
-    echo -e "${BLUE}━━━ Shuttle 配置 (shuttle.uniontech.com) ━━━${NC}"
-    echo "  用于从 shuttle.uniontech.com 下载 deb 包"
-    echo ""
-
-    read -p "  Shuttle 用户名: " SHUTTLE_USERNAME
-    read -sp "  Shuttle 密码: " SHUTTLE_PASSWORD
-    echo ""
-
-    echo ""
-    echo -e "${BLUE}━━━ Gerrit 配置 (gerrit.uniontech.com) ━━━${NC}"
-    echo "  用于下载和管理代码仓库"
-    echo ""
-
-    read -p "  Gerrit 用户名: " GERRIT_USERNAME
-    read -sp "  Gerrit 密码: " GERRIT_PASSWORD
-    echo ""
-}
-
-# 从环境变量写入配置文件
-write_config_from_env() {
-    echo -e "${YELLOW}从环境变量写入配置...${NC}"
-
-    # 优先使用项目根目录的 accounts.json
-    local accounts_file="$PROJECT_ROOT_ACCOUNTS"
-    if [[ ! -f "$accounts_file" ]] && [[ -f "$CONFIG_DIR/accounts.json" ]]; then
-        accounts_file="$CONFIG_DIR/accounts.json"
-    fi
-
-    # 如果已存在配置文件，只更新账号部分，保留 paths 等其他配置
-    if [[ -f "$accounts_file" ]] && command -v jq &> /dev/null; then
-        jq --arg su "$SHUTTLE_USERNAME" \
-           --arg sp "$SHUTTLE_PASSWORD" \
-           --arg gu "$GERRIT_USERNAME" \
-           --arg gp "$GERRIT_PASSWORD" \
-           '.shuttle.account.username = $su | .shuttle.account.password = $sp | .gerrit.account.username = $gu | .gerrit.account.password = $gp' \
-           "$accounts_file" > "${accounts_file}.tmp" && mv "${accounts_file}.tmp" "$accounts_file"
-    else
-        # 生成完整的 accounts.json
-        cat > "$accounts_file" << EOF
-{
-    "shuttle": {
-        "name": "Shuttle UnionTech",
-        "description": "用于从 shuttle.uniontech.com 下载 deb 包",
-        "url": "https://shuttle.uniontech.com",
-        "api_url": "https://shuttle.uniontech.com/api/download",
-        "account": {
-            "username": "$SHUTTLE_USERNAME",
-            "password": "$SHUTTLE_PASSWORD"
-        }
-    },
-    "metabase": {
-        "name": "Metabase",
-        "description": "用于下载崩溃数据",
-        "url": "https://metabase.cicd.getdeepin.org",
-        "api_session": "/api/session",
-        "api_dataset": "/api/dataset",
-        "account": {
-            "username": "app@deepin.org",
-            "password": "deepin123"
-        },
-        "database": {
-            "id": 10,
-            "source_table_id": 196
-        }
-    },
-    "gerrit": {
-        "name": "Gerrit",
-        "description": "用于下载和管理代码仓库",
-        "host": "gerrit.uniontech.com",
-        "port": "29418",
-        "account": {
-            "username": "$GERRIT_USERNAME",
-            "password": "$GERRIT_PASSWORD"
-        },
-        "ssh_key": "$HOME/.ssh/id_rsa"
-    },
-    "internal_server": {
-        "name": "内部构建服务器",
-        "description": "用于从内部构建服务器下载 deb 包和 dbgsym",
-        "url": "http://10.0.32.60:5001",
-        "tasks_endpoint": "/tasks/"
-    },
-    "system": {
-        "name": "系统配置",
-        "description": "系统级配置",
-        "sudo_password": ""
-    },
-    "paths": {
-        "workspace": "",
-        "code_dir": "",
-        "download_dir": ""
-    }
-}
-EOF
-    fi
-
-    # 生成 shuttle.env
-    cat > "$CONFIG_DIR/shuttle.env" << EOF
-# Shuttle 配置
-SHUTTLE_URL="https://shuttle.uniontech.com"
-SHUTTLE_API_URL="https://shuttle.uniontech.com/api/download"
-SHUTTLE_USERNAME="$SHUTTLE_USERNAME"
-SHUTTLE_PASSWORD="$SHUTTLE_PASSWORD"
-EOF
-
-    # 生成 gerrit.env
-    cat > "$CONFIG_DIR/gerrit.env" << EOF
-# Gerrit 配置
-GERRIT_HOST="gerrit.uniontech.com"
-GERRIT_PORT="29418"
-GERRIT_USER="$GERRIT_USERNAME"
-GERRIT_PASSWORD="$GERRIT_PASSWORD"
-GERRIT_SSH_KEY="$HOME/.ssh/id_rsa"
-EOF
-
-    # 生成 local.env
-    cat > "$CONFIG_DIR/local.env" << EOF
-# 本地路径配置
-WORKSPACE="$WORKSPACE"
-CODE_DIR="$WORKSPACE/3.代码管理"
-DOWNLOAD_DIR="$WORKSPACE/4.包管理/downloads"
-EOF
-
-    echo -e "${GREEN}✅ 配置已写入${NC}"
-    echo "   - $PROJECT_ROOT_ACCOUNTS"
-    echo "   - $CONFIG_DIR/shuttle.env"
-    echo "   - $CONFIG_DIR/gerrit.env"
-    echo "   - $CONFIG_DIR/local.env"
+    echo -e "${GREEN}✅ 配置检查通过${NC}"
 }
 
 # 帮助信息
@@ -291,20 +124,16 @@ ${GREEN}用法:${NC}
     $0 [选项]
 
 ${GREEN}首次使用:${NC}
-    首次运行时会提示编辑配置文件输入账号信息
+    先完善仓库根目录 accounts.json，缺少必需账号或密码时流程会直接暂停
 
 ${GREEN}账号配置方式:${NC}
-    方式1: 环境变量传入（推荐自动化使用）
-           SHUTTLE_USERNAME    Shuttle 用户名
-           SHUTTLE_PASSWORD   Shuttle 密码
-           GERRIT_USERNAME    Gerrit 用户名
-           GERRIT_PASSWORD    Gerrit 密码
-    方式2: 编辑配置文件（首次运行时会提示）
-           配置文件: config/accounts.json
+    唯一入口: 仓库根目录 accounts.json
+           ~/.openclaw/skills/coredump-analysis-skills/accounts.json
 
 ${GREEN}选项:${NC}
-    --package <name>       包名（必需）
+    --packages <name>      包名（必需，文档推荐写法）
                            例如: dde-dock, dde-control-center, dde-launcher
+    --package <name>       兼容旧参数，等价于 --packages
     --start-date <date>   开始日期（格式: YYYY-MM-DD；默认不限制）
                            例如: 2026-04-05
     --end-date <date>     结束日期（格式: YYYY-MM-DD；默认不限制）
@@ -313,16 +142,20 @@ ${GREEN}选项:${NC}
                            例如: 1070, 1070-1075
     --arch <arch>         架构（默认: x86）
                            例如: x86, x86_64, arm64
+    --versions <list>     仅分析指定版本，逗号分隔
+                           例如: 5.8.32,5.8.33
     --workspace <dir>      工作目录（默认: 自动创建带时间戳的目录 ~/coredump-workspace-YYYYMMDD-HHMMSS）
     --help, -h            显示此帮助信息
 
 ${GREEN}示例:${NC}
     # 分析最近3天的dde-dock崩溃
-    $0 --package dde-dock --start-date 2026-04-05 --end-date 2026-04-08
+    $0 --packages dde-dock --start-date 2026-04-05 --end-date 2026-04-08
 
-    # 使用环境变量传入账号
-    SHUTTLE_USERNAME=user SHUTTLE_PASSWORD=pass GERRIT_USERNAME=user GERRIT_PASSWORD=pass \
-        $0 --package dde-session-ui --start-date 2026-03-14 --end-date 2026-04-14
+    # 使用 accounts.json 中的账号
+    $0 --packages dde-session-ui --start-date 2026-03-14 --end-date 2026-04-14
+
+    # 仅重跑指定版本
+    $0 --packages dde-session-ui --workspace /path/to/workspace --versions 5.8.32
 
 ${BLUE}=============================================================================
 ${NC}
@@ -333,6 +166,10 @@ EOF
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --packages)
+                PACKAGE="$2"
+                shift 2
+                ;;
             --package)
                 PACKAGE="$2"
                 shift 2
@@ -353,6 +190,10 @@ parse_args() {
                 ARCH="$2"
                 shift 2
                 ;;
+            --versions)
+                SELECTED_VERSIONS="$2"
+                shift 2
+                ;;
             --workspace)
                 WORKSPACE="$2"
                 shift 2
@@ -371,7 +212,7 @@ parse_args() {
 
     # 验证必需参数
     if [[ -z "$PACKAGE" ]]; then
-        echo -e "${RED}错误: 必须指定 --package 参数${NC}"
+        echo -e "${RED}错误: 必须指定 --packages 参数${NC}"
         show_help
         exit 1
     fi
@@ -573,9 +414,11 @@ download_source_for_version() {
     # 设置环境变量并执行脚本
     if COREDUMP_WORKSPACE="$WORKSPACE" GERRIT_USER="$GERRIT_USER" GERRIT_HOST="${GERRIT_HOST:-gerrit.uniontech.com}" GERRIT_PORT="${GERRIT_PORT:-29418}" \
        bash "$source_script" "$package" "$version" >&2; then
+        set_step_result "ok" "source checkout ready"
         echo -e "${GREEN}✅ 代码切换完成${NC}"
         return 0
     else
+        set_step_result "failed" "source checkout failed"
         echo -e "${RED}❌ 代码切换失败${NC}"
         return 1
     fi
@@ -591,6 +434,7 @@ download_packages_for_version() {
 
     if [[ ! -f "$dl_script" ]]; then
         echo -e "${RED}错误: 包下载脚本不存在: $dl_script${NC}" >&2
+        set_step_result "failed_missing_script" "package download script missing"
         return 1
     fi
 
@@ -604,6 +448,7 @@ download_packages_for_version() {
 
     if ! can_install_deb_packages; then
         echo -e "${YELLOW}⚠️ 未配置 sudo 密码且当前用户无免密 sudo，跳过 deb/dbgsym 下载${NC}"
+        set_step_result "skipped_no_sudo" "no sudo capability, skip package download"
         return 0
     fi
 
@@ -620,10 +465,12 @@ download_packages_for_version() {
     #   pkg_1.2.3+build_amd64.deb / pkg_1.2.3.1-1_amd64.deb
     if [[ -d "$dl_dir" ]] && [[ -n "$(find_deb_files_for_version "$dl_dir" "$package" "$clean_version")" ]]; then
         echo -e "${GREEN}✅ 包下载完成${NC}"
+        set_step_result "ok" "deb packages downloaded"
         return 0
     else
         echo -e "${YELLOW}⚠️ 未找到 $package $clean_version 的包（精确版本不匹配），跳过${NC}"
         echo "$package $clean_version (精确版本不匹配)" >> "$skipped_versions_file"
+        set_step_result "skipped_no_matching_package" "no matching deb/dbgsym package found"
         return 1
     fi
 }
@@ -664,6 +511,7 @@ analyze_crashes_for_version() {
 
     if [[ ! -f "$analyze_script" ]]; then
         echo -e "${RED}错误: 分析脚本不存在: $analyze_script${NC}" >&2
+        set_step_result "failed_missing_script" "version analysis script missing"
         return 1
     fi
 
@@ -732,8 +580,20 @@ expect {
         --workspace "$WORKSPACE" \
         --max-crashes 50 2>&1 || true
 
-    echo -e "${GREEN}✅ 版本 $version 分析完成${NC}"
-    return 0
+    local version_dir="${clean_version//./_}"
+    version_dir="${version_dir//+/_}"
+    version_dir="${version_dir//-/_}"
+    local analysis_json="$WORKSPACE/5.崩溃分析/$package/version_${version_dir}/analysis.json"
+
+    if [[ -f "$analysis_json" ]]; then
+        set_step_result "ok" "analysis.json generated"
+        echo -e "${GREEN}✅ 版本 $version 分析完成${NC}"
+        return 0
+    fi
+
+    set_step_result "failed_no_output" "analysis.json not generated"
+    echo -e "${YELLOW}⚠️ 版本 $version 未生成 analysis.json${NC}"
+    return 1
 }
 
 # 步骤4: 包管理（保留用于批量生成任务）
@@ -900,12 +760,6 @@ report_progress() {
 
 # 主函数
 main() {
-    echo -e "${BLUE}"
-    echo "============================================================================="
-    echo "            dde-dock/dde-control-center 崩溃分析完整流程"
-    echo "============================================================================="
-    echo -e "${NC}"
-
     # 1. 解析命令行参数
     parse_args "$@"
 
@@ -917,6 +771,7 @@ main() {
 
     # 4. 创建工作目录
     setup_workspace
+    init_status_files
 
     # 5. 执行分析步骤
     # 步骤1+2: 数据下载和筛选（只执行一次）
@@ -927,8 +782,21 @@ main() {
     # 从版本列表读取每个版本，依次执行：切换代码→下载包→分析崩溃
     local versions_txt="$WORKSPACE/2.数据筛选/${PACKAGE}_crash_versions.txt"
     if [[ -f "$versions_txt" ]]; then
-        local version_count=$(wc -l < "$versions_txt")
+        local version_count=0
+        while IFS= read -r version_line; do
+            [[ -z "$version_line" ]] && continue
+            local version_with_count="${version_line}"
+            local rest="${version_with_count%:*}"
+            local version="${rest#*:}"
+            local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
+            if version_selected "$clean_version"; then
+                ((version_count++)) || true
+            fi
+        done < "$versions_txt"
         echo -e "${YELLOW}共 ${version_count} 个版本需要分析${NC}"
+        if [[ -n "$SELECTED_VERSIONS" ]]; then
+            echo -e "${YELLOW}版本过滤: ${SELECTED_VERSIONS}${NC}"
+        fi
         echo ""
 
         local success_count=0
@@ -951,6 +819,10 @@ main() {
             # 清理版本号（移除 epoch 前缀和 -1 后缀）
             local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
 
+            if ! version_selected "$clean_version"; then
+                continue
+            fi
+
             echo -e "${BLUE}════════════════════════════════════════════════════════════════════════${NC}"
             echo -e "${GREEN}处理版本: $version -> $clean_version${NC}"
             echo -e "${BLUE}════════════════════════════════════════════════════════════════════════${NC}"
@@ -961,6 +833,7 @@ main() {
             else
                 ((fail_count++)) || true
             fi
+            log_version_status "$clean_version" "source" "${STEP_STATUS:-unknown}" "${STEP_MESSAGE:-}"
 
             # 步骤4: 下载该版本的包
             if download_packages_for_version "$PACKAGE" "$clean_version"; then
@@ -968,6 +841,7 @@ main() {
             else
                 ((fail_count++)) || true
             fi
+            log_version_status "$clean_version" "package" "${STEP_STATUS:-unknown}" "${STEP_MESSAGE:-}"
 
             # 步骤5: 安装包并分析崩溃
             if analyze_crashes_for_version "$PACKAGE" "$clean_version" "$filtered_csv"; then
@@ -975,6 +849,7 @@ main() {
             else
                 ((fail_count++)) || true
             fi
+            log_version_status "$clean_version" "analysis" "${STEP_STATUS:-unknown}" "${STEP_MESSAGE:-}"
 
             echo ""
 
@@ -1042,11 +917,11 @@ main() {
 
         local final_report_script="$SKILLS_DIR/coredump-full-analysis/scripts/generate_final_report.py"
         if [[ -f "$final_report_script" ]]; then
-            mkdir -p "$WORKSPACE/7.总结报告"
+            mkdir -p "$WORKSPACE/$SUMMARY_DIR_NAME"
             python3 "$final_report_script" \
                 --package "$PACKAGE" \
                 --workspace "$WORKSPACE" \
-                --output-dir "$WORKSPACE/7.总结报告" 2>&1 || true
+                --output-dir "$WORKSPACE/$SUMMARY_DIR_NAME" 2>&1 || true
             echo -e "${GREEN}✅ 总结报告已生成${NC}"
         else
             echo -e "${YELLOW}⚠️ 总结报告脚本不存在: $final_report_script${NC}"
@@ -1061,7 +936,7 @@ main() {
     echo -e "${NC}"
     echo "📊 统计报告: $WORKSPACE/2.数据筛选/${PACKAGE}_crash_statistics.json"
     echo "📋 筛选数据: $WORKSPACE/2.数据筛选/filtered_${PACKAGE}_crash_data.csv"
-    echo "📄 分析报告: $WORKSPACE/7.总结报告/"
+    echo "📄 分析报告: $WORKSPACE/$SUMMARY_DIR_NAME/"
     echo ""
 }
 

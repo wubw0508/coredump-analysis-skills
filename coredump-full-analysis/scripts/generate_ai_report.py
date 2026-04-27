@@ -4,6 +4,74 @@ import json
 from pathlib import Path
 from collections import defaultdict
 import argparse
+from datetime import datetime
+
+from package_rules import get_pattern_ai_explanations
+
+
+def build_generic_explanation(crash, func: str):
+    """在没有包级规则文案时提供保守兜底说明。"""
+    signal = crash.get('signal', 'UNKNOWN')
+    fixable = crash.get('fixable')
+    reason = crash.get('reason') or '需要进一步调试分析'
+    key_frame = crash.get('key_frame') or {}
+    library = key_frame.get('library') or crash.get('app_layer_library') or '未知库'
+    symbol = key_frame.get('symbol') or func or '未知符号'
+
+    if signal == 'SIGABRT':
+        return {
+            'analysis': f'崩溃表现为 {signal}，通常是检测到异常状态后主动终止。',
+            'cause': f'关键位置位于 `{library}` 的 `{symbol}`，当前更像断言失败、致命日志或未处理异常。',
+            'suggestion': '检查触发 abort 前的错误路径、断言条件和异常处理逻辑。',
+        }
+
+    if signal == 'SIGSEGV':
+        return {
+            'analysis': f'崩溃表现为 {signal}，属于非法内存访问。',
+            'cause': f'关键位置位于 `{library}` 的 `{symbol}`，常见于空指针、悬空对象或越界访问。当前判断为：{reason}。',
+            'suggestion': '优先检查关键帧附近对象生命周期、空值保护、线程切换和容器边界。',
+        }
+
+    if fixable is True:
+        return {
+            'analysis': '已识别为可继续修复的崩溃。',
+            'cause': f'关键位置位于 `{library}` 的 `{symbol}`，当前判断为：{reason}。',
+            'suggestion': '结合版本源码和符号文件，优先检查关键帧附近的前置条件与资源状态。',
+        }
+
+    if fixable is False:
+        return {
+            'analysis': '当前更像外部库、环境或运行时触发的问题。',
+            'cause': f'关键位置位于 `{library}` 的 `{symbol}`，当前判断为：{reason}。',
+            'suggestion': '补充环境信息、依赖版本和原始 coredump，确认是否属于上游库或外部条件触发。',
+        }
+
+    return {
+        'analysis': '当前规则已完成基础归类，但仍需进一步调试。',
+        'cause': f'关键位置位于 `{library}` 的 `{symbol}`，当前判断为：{reason}。',
+        'suggestion': '继续结合源码、build-id、addr2line 和原始 coredump 做二次定位。',
+    }
+
+
+def infer_root_cause_category(crash, pattern_explanations):
+    """基于模式标签优先，其次回退到信号/修复性做通用分类。"""
+    pattern = crash.get('pattern_name', '')
+    if pattern and pattern in pattern_explanations:
+        category = pattern_explanations[pattern].get('category')
+        if category:
+            return category
+
+    signal = crash.get('signal', 'UNKNOWN')
+    if pattern == 'opaque_no_symbols':
+        return '符号缺失/环境问题'
+    if signal == 'SIGABRT':
+        return '异常终止/断言'
+    if signal == 'SIGSEGV':
+        return '内存访问/对象生命周期'
+    if crash.get('fixable') is False:
+        return '外部库/环境问题'
+    return '其他'
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -14,9 +82,11 @@ def main():
     pkg = args.package
     workspace = Path(args.workspace)
     analysis_dir = workspace / '5.崩溃分析' / pkg
+    pattern_explanations = get_pattern_ai_explanations(pkg)
 
     # 收集所有崩溃
     all_crashes = []
+    versions_seen = set()
     for vf in sorted(analysis_dir.glob('version_*/analysis.json')):
         ver = vf.parent.name.replace('version_', '').replace('_', '.')
         with open(vf) as f:
@@ -24,12 +94,20 @@ def main():
         for c in data.get('crashes', []):
             c['version'] = ver
             all_crashes.append(c)
+            versions_seen.add(ver)
+
+    dates = [c.get('date') for c in all_crashes if c.get('date')]
+    start_date = min(dates) if dates else '未知'
+    end_date = max(dates) if dates else '未知'
 
     # 按函数聚合
     by_func = defaultdict(list)
     for c in all_crashes:
+        key_frame = c.get('key_frame') or {}
         func = c.get('app_layer_symbol', '') or \
-               (c.get('description', '').split()[-1] if c.get('description') else 'unknown')
+               key_frame.get('symbol', '') or \
+               c.get('pattern_name', '') or \
+               'unknown'
         by_func[func].append(c)
 
     # 按信号聚合
@@ -43,9 +121,9 @@ def main():
 
     lines = []
     lines.append(f"# {pkg} 崩溃 AI 分析报告\n")
-    lines.append(f"**生成时间**: 2026-04-15\n")
-    lines.append(f"**数据范围**: 2026-03-15 至 2026-04-15\n")
-    lines.append(f"**分析版本**: {len(set(c['version'] for c in all_crashes))} 个\n")
+    lines.append(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    lines.append(f"**数据范围**: {start_date} 至 {end_date}\n")
+    lines.append(f"**分析版本**: {len(versions_seen)} 个\n")
     lines.append(f"**唯一崩溃**: {len(all_crashes)} 个\n")
     lines.append(f"**总崩溃次数**: {sum(c.get('count', 1) for c in all_crashes)}\n")
     lines.append("\n---\n")
@@ -74,7 +152,12 @@ def main():
         lines.append(f"**崩溃次数**: {total_count}\n")
         lines.append(f"**涉及版本**: {', '.join(versions[:5])}{' ...' if len(versions) > 5 else ''}\n")
         lines.append(f"**信号类型**: {top_sig}\n")
-        lines.append(f"**涉及库**: {crashes[0].get('app_layer_library', 'N/A')}\n")
+        crash0 = crashes[0]
+        key_frame = crash0.get('key_frame') or {}
+        pattern = crash0.get('pattern_name', '')
+        lines.append(f"**涉及库**: {crash0.get('app_layer_library') or key_frame.get('library', 'N/A')}\n")
+        if pattern:
+            lines.append(f"**模式标签**: {pattern}\n")
 
         stack = crashes[0].get('stack_info', '')
         if stack:
@@ -85,47 +168,16 @@ def main():
             lines.append(f"```\n")
 
         # AI 分析
-        func_lower = func.lower()
-        if 'updater' in func_lower or 'update' in func_lower:
-            lines.append(f"**AI 分析**: Updater 类析构函数崩溃，可能是 D-Bus 回调对象在 Qt 父子对象树析构期间被提前销毁。\n")
-            lines.append(f"**可能原因**: `QMap<QString, QDBusPendingCallWatcher*>` 在析构时访问了已被删除的 D-Bus 监视器对象。\n")
-            lines.append(f"**修复建议**: 在 Updater 析构前，先断开所有 D-Bus 信号连接并清空 QMap。\n")
-        elif 'wallpaper' in func_lower or 'screensaver' in func_lower or 'provider' in func_lower:
-            lines.append(f"**AI 分析**: 壁纸/屏保 Provider 析构时 D-Bus 连接异常终止。\n")
-            lines.append(f"**可能原因**: D-Bus 消息在 Provider 析构期间仍被发送，导致 D-Bus 守护进程断言失败并调用 `abort()`。\n")
-            lines.append(f"**修复建议**: 在 Provider 析构时，先调用 `QThread::quit()` 等待事件循环退出，再销毁对象。\n")
-        elif 'xcb' in func_lower or 'sn_xcb' in func_lower or 'QXcbConnection' in func_lower or 'Display' in func:
-            lines.append(f"**AI 分析**: XCB 显示连接初始化失败。\n")
-            lines.append(f"**可能原因**: `sn_xcb_display_new` 调用时 `Display` 指针尚未就绪，或 XCB 连接已在其他线程关闭。\n")
-            lines.append(f"**修复建议**: 在调用 XCB 函数前检查 `Display` 是否为 `nullptr`，并确保 XCB 连接在主线程访问。\n")
-        elif 'widget' in func_lower and ('D1Ev' in func or 'D0Ev' in func):
-            lines.append(f"**AI 分析**: Qt Widget 析构函数崩溃。\n")
-            lines.append(f"**可能原因**: Widget 在事件循环运行期间被析构，导致 `QCoreApplication::postEvent()` 访问已销毁的 QObject。\n")
-            lines.append(f"**修复建议**: 在 Widget 析构前，先调用 `disconnect()` 断开所有信号槽连接，并确保事件循环已退出。\n")
-        elif 'dccnetwork' in func_lower or ('network' in func_lower and 'module' in func_lower):
-            lines.append(f"**AI 分析**: 网络插件 Module 析构时 D-Bus 断开通知触发崩溃。\n")
-            lines.append(f"**可能原因**: D-Bus 连接断开时发送 `disconnectNotify` 信号，但 `DCCNetworkModule` 对象已在销毁中。\n")
-            lines.append(f"**修复建议**: 使用 `QPointer<>` 追踪网络模块对象生命周期，在 `disconnectNotify` 中检查对象是否仍有效。\n")
-        elif func_lower == 'main' or func_lower == '':
-            lines.append(f"**AI 分析**: main 函数崩溃，通常是应用初始化期间发生未捕获异常。\n")
-            lines.append(f"**可能原因**: 应用启动时 Qt 事件循环初始化顺序不当，导致空指针访问。\n")
-            lines.append(f"**修复建议**: 检查 `main()` 函数中 `QApplication` 及其插件的初始化顺序。\n")
-        elif 'qobject' in func_lower or 'event' in func_lower:
-            lines.append(f"**AI 分析**: QObject 事件处理期间发生崩溃。\n")
-            lines.append(f"**可能原因**: 事件处理函数访问了已被删除的子对象。\n")
-            lines.append(f"**修复建议**: 在事件处理函数中使用 `QPointer<>` 保护可能已删除的对象。\n")
-        elif 'raise' in func_lower or 'abort' in func_lower:
-            lines.append(f"**AI 分析**: 应用主动调用 `raise()` 或 `abort()` 终止。\n")
-            lines.append(f"**可能原因**: D-Bus 或其他系统级检查失败，触发断言。\n")
-            lines.append(f"**修复建议**: 检查 `raise()` / `abort()` 调用前的条件，确认是否有未处理的错误状态。\n")
-        elif 'qtconcurrent' in func_lower or 'runfunctiontask' in func_lower:
-            lines.append(f"**AI 分析**: QtConcurrent 异步任务执行期间崩溃。\n")
-            lines.append(f"**可能原因**: 并发任务访问了已被主线程销毁的 Qt 对象。\n")
-            lines.append(f"**修复建议**: 使用 `QThread::wait()` 确保任务完成后再销毁相关对象，或使用 `QObject::moveToThread()` 管理线程安全。\n")
+        if pattern in pattern_explanations:
+            info = pattern_explanations[pattern]
+            lines.append(f"**AI 分析**: {info['analysis']}\n")
+            lines.append(f"**可能原因**: {info['cause']}\n")
+            lines.append(f"**修复建议**: {info['suggestion']}\n")
         else:
-            lines.append(f"**AI 分析**: 需要进一步调试分析。\n")
-            lines.append(f"**可能原因**: 根据堆栈推断为 C++ 对象析构时序问题。\n")
-            lines.append(f"**修复建议**: 检查对应对象析构函数，确认所有子对象和信号槽连接是否正确清理。\n")
+            info = build_generic_explanation(crash0, func)
+            lines.append(f"**AI 分析**: {info['analysis']}\n")
+            lines.append(f"**可能原因**: {info['cause']}\n")
+            lines.append(f"**修复建议**: {info['suggestion']}\n")
 
         lines.append(f"\n---\n")
 
@@ -134,29 +186,10 @@ def main():
     total = sum(c.get('count', 1) for c in all_crashes)
     lines.append(f"本次分析共发现 **{len(all_crashes)}** 个唯一崩溃，分布在 **{len(set(c['version'] for c in all_crashes))}** 个版本中。\n")
 
-    root_causes = {
-        '对象析构时序': 0,
-        'D-Bus连接问题': 0,
-        'XCB/X11连接': 0,
-        'Qt事件循环': 0,
-        '第三方库问题': 0,
-        '其他': 0
-    }
-    for func, crashes in by_func.items():
-        count = sum(c.get('count', 1) for c in crashes)
-        fl = func.lower()
-        if 'updater' in fl or 'update' in fl or 'provider' in fl or 'watcher' in fl:
-            root_causes['D-Bus连接问题'] += count
-        elif 'xcb' in fl or 'sn_xcb' in fl or 'QXcbConnection' in fl or 'Display' in func:
-            root_causes['XCB/X11连接'] += count
-        elif 'widget' in fl or 'D1Ev' in func or 'D0Ev' in func or ('event' in fl and 'QObject' in func):
-            root_causes['Qt事件循环'] += count
-        elif 'delete' in fl or 'children' in fl or 'destroy' in fl or 'finalize' in fl:
-            root_causes['对象析构时序'] += count
-        elif 'qtconcurrent' in fl or 'runfunctiontask' in fl:
-            root_causes['第三方库问题'] += count
-        else:
-            root_causes['其他'] += count
+    root_causes = {}
+    for crash in all_crashes:
+        category = infer_root_cause_category(crash, pattern_explanations)
+        root_causes[category] = root_causes.get(category, 0) + crash.get('count', 1)
 
     lines.append(f"\n### 根因分类统计\n")
     for cause, count in sorted(root_causes.items(), key=lambda x: -x[1]):
@@ -165,16 +198,16 @@ def main():
             lines.append(f"- **{cause}**: {count} 次 ({pct:.1f}%)\n")
 
     lines.append(f"\n### 整体建议\n")
-    if root_causes['对象析构时序'] > 0:
+    if root_causes.get('内存访问/对象生命周期', 0) > 0:
         lines.append(f"1. **修复对象析构时序问题**: 使用 `QPointer<>` 或显式 `disconnect()` 避免访问已销毁对象。\n")
-    if root_causes['D-Bus连接问题'] > 0:
+    if root_causes.get('D-Bus/进程通信', 0) > 0:
         lines.append(f"2. **修复 D-Bus 连接管理**: 在析构前先断开 D-Bus 连接，避免析构期间仍有消息发送。\n")
-    if root_causes['XCB/X11连接'] > 0:
-        lines.append(f"3. **修复 XCB 连接初始化**: 确保 `Display` 就绪后再调用 XCB 函数，使用互斥锁保护多线程访问。\n")
-    if root_causes['Qt事件循环'] > 0:
-        lines.append(f"4. **修复 Qt 事件循环问题**: 避免在析构期间调用 `postEvent()`，先退出事件循环再销毁对象。\n")
-    if root_causes['第三方库问题'] > 0:
-        lines.append(f"5. **修复 QtConcurrent 并发问题**: 确保异步任务完成后再销毁相关 Qt 对象。\n")
+    if root_causes.get('Qt事件循环', 0) > 0:
+        lines.append(f"3. **修复 Qt 事件循环问题**: 避免在析构期间调用 `postEvent()`，先退出事件循环再销毁对象。\n")
+    if root_causes.get('图标渲染/资源加载', 0) > 0:
+        lines.append(f"4. **补强图标与资源加载兜底**: 对图标路径、SVG 数据、pixmap 加载结果和主题项增加非空校验与 fallback。\n")
+    if root_causes.get('符号缺失/环境问题', 0) > 0:
+        lines.append(f"5. **补齐符号与构建信息**: 为缺符号版本补充 dbgsym、build-id 和原始 coredump，避免剩余崩溃停留在 opaque 状态。\n")
     lines.append(f"6. **增加测试覆盖**: 针对插件加载/卸载场景编写自动化测试，覆盖对象生命周期完整路径。\n")
 
     report_file = analysis_dir / 'AI_analysis_report.md'

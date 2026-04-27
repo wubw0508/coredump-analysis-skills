@@ -18,11 +18,8 @@ NC='\033[0m' # No Color
 # Skills目录
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
 
-# 加载配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../config/metabase.env" 2>/dev/null || true
-source "$SCRIPT_DIR/../config/gerrit.env" 2>/dev/null || true
-source "$SCRIPT_DIR/../config/package-server.env" 2>/dev/null || true
+LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
 source "$SCRIPT_DIR/../config/loop.env" 2>/dev/null || true
 
 # 默认值
@@ -172,6 +169,19 @@ check_dependencies() {
     echo -e "${GREEN}    ✅ 依赖检查完成${NC}"
 }
 
+load_required_accounts() {
+    print_step "检查" "账号配置..."
+
+    if [[ ! -f "$LOAD_ACCOUNTS_SCRIPT" ]]; then
+        echo -e "${RED}    错误: 账号加载脚本不存在: $LOAD_ACCOUNTS_SCRIPT${NC}"
+        exit 1
+    fi
+
+    source "$LOAD_ACCOUNTS_SCRIPT"
+    load_accounts_or_die metabase gerrit shuttle system
+    echo -e "${GREEN}    ✅ 已从 accounts.json 加载账号配置${NC}"
+}
+
 # 创建工作目录
 setup_workspace() {
     print_step "准备" "工作目录..."
@@ -301,7 +311,7 @@ phase1_prepare() {
             echo -e "${GREEN}    ✅ 代码仓库已存在: $PACKAGE${NC}"
         else
             # 克隆仓库
-            local gerrit_user="${GERRIT_USER:-ut000168}"
+            local gerrit_user="${GERRIT_USER}"
             local gerrit_host="${GERRIT_HOST:-gerrit.uniontech.com}"
             local gerrit_port="${GERRIT_PORT:-29418}"
 
@@ -460,6 +470,7 @@ main() {
     echo -e "${NC}"
 
     parse_args "$@"
+    load_required_accounts
     check_dependencies
     setup_workspace
 

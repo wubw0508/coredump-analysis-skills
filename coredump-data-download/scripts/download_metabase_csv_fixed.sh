@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-# 从 centralized 配置加载 Metabase 信息
-WORKSPACE="$(dirname "$(dirname "$(realpath "$0")")")"
-if [ -f "$WORKSPACE/centralized/config.env" ]; then
-    . "$WORKSPACE/centralized/config.env"
-fi
-
-# 确保所有变量都有默认值
-BASE_URL="${BASE_URL:-${METABASE_BASE_URL:-https://metabase.cicd.getdeepin.org}}"
-USERNAME="${USERNAME:-${METABASE_USERNAME:-app@deepin.org}}"
-PASSWORD="${PASSWORD:-${METABASE_PASSWORD:-deepin123}}"
+# 从 accounts.json 加载 Metabase 信息
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILLS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LOAD_ACCOUNTS_SCRIPT="$SKILLS_ROOT/coredump-full-analysis/scripts/load_accounts.sh"
+source "$LOAD_ACCOUNTS_SCRIPT"
+load_accounts_or_die metabase
+BASE_URL="${BASE_URL:-$METABASE_BASE_URL}"
+USERNAME="${USERNAME:-$METABASE_USERNAME}"
+PASSWORD="${PASSWORD:-$METABASE_PASSWORD}"
 DATABASE_ID="${DATABASE_ID:-${METABASE_DATABASE_ID:-10}}"
 DEFAULT_DATE="$(date +%Y%m%d-%H%M)"
 

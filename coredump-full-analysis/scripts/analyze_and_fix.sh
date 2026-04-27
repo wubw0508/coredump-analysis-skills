@@ -18,16 +18,45 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$SCRIPT_DIR/../config"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
+LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
 
-# 加载配置
-source "$CONFIG_DIR/local.env" 2>/dev/null || true
-WORKSPACE="${WORKSPACE:-.}"
-SUDO_PASSWORD="${SUDO_PASSWORD:-1}"
+# 工作目录优先级：--workspace > WORKSPACE 环境变量 > 当前目录
+WORKSPACE="${WORKSPACE:-$(pwd)}"
+source "$LOAD_ACCOUNTS_SCRIPT"
+load_accounts_or_die system
 
-# 参数
-PACKAGE="${1:-}"
-START_VERSION="${2:-}"
-END_VERSION="${3:-}"
+PACKAGE=""
+START_VERSION=""
+END_VERSION=""
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --workspace)
+                WORKSPACE="$2"
+                shift 2
+                ;;
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            *)
+                if [[ -z "$PACKAGE" ]]; then
+                    PACKAGE="$1"
+                elif [[ -z "$START_VERSION" ]]; then
+                    START_VERSION="$1"
+                elif [[ -z "$END_VERSION" ]]; then
+                    END_VERSION="$1"
+                else
+                    echo -e "${RED}错误: 未知参数: $1${NC}"
+                    show_help
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
+}
 
 show_help() {
     cat << EOF
@@ -35,12 +64,13 @@ ${BLUE}=========================================================================
 崩溃分析完整流程 - 下载、安装、分析、修复提交${NC}
 
 ${GREEN}用法:${NC}
-    $0 <package> [start_version] [end_version]
+    $0 [--workspace <dir>] <package> [start_version] [end_version]
 
 ${GREEN}示例:${NC}
     $0 dde-dock                    # 分析dde-dock所有版本
     $0 dde-dock 5.7.28.2          # 只分析5.7.28.2
     $0 dde-launcher 5.6.15 5.7.20 # 分析指定版本范围
+    $0 --workspace /path/to/workspace dde-dock
 
 ${GREEN}完整流程:${NC}
     1. 切换到版本分支（或develop/eagle）
@@ -55,6 +85,8 @@ ${GREEN}完整流程:${NC}
 ${BLUE}=============================================================================${NC}
 EOF
 }
+
+parse_args "$@"
 
 if [[ -z "$PACKAGE" ]]; then
     show_help

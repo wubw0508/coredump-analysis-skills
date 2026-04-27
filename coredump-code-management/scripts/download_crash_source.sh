@@ -26,18 +26,12 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${COREDUMP_WORKSPACE:-$SCRIPT_DIR/../../..}"
 CODE_DIR="${WORKSPACE}/3.代码管理"
-
-# 从 centralized 配置加载 Gerrit 信息
-CENTRALIZED_CONFIG="$SCRIPT_DIR/../../coredump-crash-analysis/centralized/base_config.py"
-if [ -f "$CENTRALIZED_CONFIG" ]; then
-    # 从 Python 配置加载
-    GERRIT_USER=$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR/../../coredump-crash-analysis'); from centralized.base_config import GERRIT_BASE_URL; print('ut000168')" 2>/dev/null || echo "ut000168")
-fi
-
-# 默认值
-GERRIT_USER="${GERRIT_USER:-ut000168}"
+LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/../../coredump-full-analysis/scripts/load_accounts.sh"
+source "$LOAD_ACCOUNTS_SCRIPT"
+load_accounts_or_die gerrit
 GERRIT_HOST="${GERRIT_HOST:-gerrit.uniontech.com}"
 GERRIT_PORT="${GERRIT_PORT:-29418}"
+GIT_SSH_COMMAND_DEFAULT="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=8"
 
 # 解析参数
 CRASH_DATA_FILE="$1"
@@ -132,16 +126,16 @@ if [ -d "$CODE_PATH/.git" ]; then
     echo -e "${CYAN}[1] 代码已存在，更新仓库...${NC}"
 
     # 使用绝对路径更新
-    git -C "$CODE_PATH" fetch --tags origin 2>/dev/null || {
+    GIT_SSH_COMMAND="$GIT_SSH_COMMAND_DEFAULT" git -C "$CODE_PATH" fetch --tags origin 2>/dev/null || {
         echo -e "${YELLOW}  git fetch 失败，尝试重试...${NC}"
         sleep 2
-        git -C "$CODE_PATH" fetch --tags origin 2>/dev/null || true
+        GIT_SSH_COMMAND="$GIT_SSH_COMMAND_DEFAULT" git -C "$CODE_PATH" fetch --tags origin 2>/dev/null || true
     }
 else
     echo -e "${CYAN}[1] 下载源代码...${NC}"
 
     # 克隆仓库
-    if git clone "ssh://${GERRIT_USER}@${GERRIT_HOST}:${GERRIT_PORT}/${PACKAGE}" "$CODE_PATH" 2>/dev/null; then
+    if GIT_SSH_COMMAND="$GIT_SSH_COMMAND_DEFAULT" git clone "ssh://${GERRIT_USER}@${GERRIT_HOST}:${GERRIT_PORT}/${PACKAGE}" "$CODE_PATH" 2>/dev/null; then
         echo -e "${GREEN}  克隆成功${NC}"
 
         # 配置 commit-msg hooks
@@ -150,8 +144,13 @@ else
             echo -e "${YELLOW}  警告：复制 hooks 失败${NC}"
         }
     else
-        echo -e "${RED}错误：克隆代码失败${NC}"
-        exit 1
+        echo -e "${YELLOW}  Gerrit 克隆失败，尝试 GitHub 镜像...${NC}"
+        if git clone "https://github.com/linuxdeepin/${PACKAGE}.git" "$CODE_PATH" 2>/dev/null; then
+            echo -e "${GREEN}  GitHub 镜像克隆成功${NC}"
+        else
+            echo -e "${RED}错误：克隆代码失败${NC}"
+            exit 1
+        fi
     fi
 fi
 

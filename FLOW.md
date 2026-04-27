@@ -121,7 +121,7 @@ C --> H[建议修复优先级]
 H -->|第一批| H1[立即修复]
 H -->|第二批| H2[近期修复]
 H -->|第三批| H3[规划修复]
-D --> OUT[/7.总结报告-full_analysis_report.md/]
+D --> OUT[/6.总结报告-full_analysis_report.md/]
 E1 --> OUT
 E2 --> OUT
 E3 --> OUT
@@ -157,7 +157,7 @@ OUT --> Z([汇总完成])
   5.崩溃分析/
     <package>_crash_analysis_report.md
   6.修复补丁/
-  7.总结报告/
+  6.总结报告/
     full_analysis_report.md
 ```
 

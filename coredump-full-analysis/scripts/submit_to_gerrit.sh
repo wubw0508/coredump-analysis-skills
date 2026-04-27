@@ -6,6 +6,11 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
+source "$LOAD_ACCOUNTS_SCRIPT"
+load_accounts_or_die gerrit
+
 # 配色输出
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -31,6 +36,8 @@ ${GREEN}选项:${NC}
     --target-branch <br>  目标分支（默认: master）
     --reviewer <email>     审查者邮箱（可多次指定）
     --dry-run              试运行，不实际提交
+    --yes, --auto-confirm  非交互模式，自动确认提交
+    --force-recreate-branch 分支已存在时自动删除并重建
     --help, -h            显示此帮助信息
 
 ${GREEN}示例:${NC}
@@ -57,6 +64,8 @@ parse_args() {
     TARGET_BRANCH="develop/eagle"
     REVIEWERS=()
     DRY_RUN=false
+    AUTO_CONFIRM=false
+    FORCE_RECREATE_BRANCH=false
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -82,6 +91,14 @@ parse_args() {
                 ;;
             --dry-run)
                 DRY_RUN=true
+                shift
+                ;;
+            --yes|--auto-confirm)
+                AUTO_CONFIRM=true
+                shift
+                ;;
+            --force-recreate-branch)
+                FORCE_RECREATE_BRANCH=true
                 shift
                 ;;
             --help|-h)
@@ -209,15 +226,25 @@ create_fix_branch() {
     # 检查是否已有同名分支
     if git show-ref --verify --quiet "refs/heads/$branch_name"; then
         echo -e "${YELLOW}分支已存在: $branch_name${NC}"
-        echo -e "是否删除并重建？(y/n): "
-        read -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if [[ "$FORCE_RECREATE_BRANCH" == "true" ]]; then
+            echo -e "${YELLOW}已启用 --force-recreate-branch，删除并重建${NC}"
             git branch -D "$branch_name"
         else
-            echo -e "使用现有分支"
-            git checkout "$branch_name"
-            return 0
+            if [[ "$AUTO_CONFIRM" == "true" ]]; then
+                echo -e "${YELLOW}非交互模式下保留现有分支${NC}"
+                git checkout "$branch_name"
+                return 0
+            fi
+            echo -e "是否删除并重建？(y/n): "
+            read -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                git branch -D "$branch_name"
+            else
+                echo -e "使用现有分支"
+                git checkout "$branch_name"
+                return 0
+            fi
         fi
     fi
 
@@ -432,7 +459,7 @@ EOF
         local gerrit_remote=$(git remote get-url origin 2>/dev/null || echo "")
         if [[ -z "$gerrit_remote" ]]; then
             # 默认Gerrit remote
-            local gerrit_user="${GERRIT_USER:-ut000168}"
+            local gerrit_user="${GERRIT_USER}"
             local gerrit_host="${GERRIT_HOST:-gerrit.uniontech.com}"
             local gerrit_port="${GERRIT_PORT:-29418}"
             gerrit_remote="ssh://${gerrit_user}@${gerrit_host}:${gerrit_port}/${package}"
@@ -476,6 +503,8 @@ main() {
     echo -e "目标分支: ${TARGET_BRANCH}"
     echo -e "审查者: ${REVIEWERS[*]:-无}"
     echo -e "试运行: ${DRY_RUN}"
+    echo -e "自动确认: ${AUTO_CONFIRM}"
+    echo -e "强制重建分支: ${FORCE_RECREATE_BRANCH}"
     echo ""
 
     # 生成修复分支名
@@ -513,11 +542,15 @@ main() {
 
     # 确认
     if [[ "$DRY_RUN" = false ]]; then
-        read -p "确认提交？(y/n): " -n 1 -r
-        echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo -e "取消提交"
-            exit 0
+        if [[ "$AUTO_CONFIRM" == "true" ]]; then
+            echo -e "${YELLOW}非交互模式，自动确认提交${NC}"
+        else
+            read -p "确认提交？(y/n): " -n 1 -r
+            echo ""
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                echo -e "取消提交"
+                exit 0
+            fi
         fi
     else
         echo -e "${YELLOW}试运行模式，跳过确认${NC}"

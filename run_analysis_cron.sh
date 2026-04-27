@@ -15,7 +15,7 @@ generate_workspace_with_timestamp() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE=$(generate_workspace_with_timestamp)
 DESKTOP_DIR="$HOME/Desktop"
-REPORT_DIR="$WORKSPACE/7.总结报告"
+REPORT_DIR="$WORKSPACE/6.总结报告"
 
 # 日志文件
 LOG_FILE="$WORKSPACE/cron_analysis_$(date +%Y%m%d_%H%M%S).log"
@@ -35,7 +35,7 @@ if [[ -d "$WORKSPACE" ]]; then
     rm -rf "$WORKSPACE/2.数据筛选" 2>/dev/null || true
     rm -rf "$WORKSPACE/4.包管理/downloads" 2>/dev/null || true
     rm -rf "$WORKSPACE/5.崩溃分析" 2>/dev/null || true
-    rm -rf "$WORKSPACE/7.总结报告" 2>/dev/null || true
+    rm -rf "$WORKSPACE/6.总结报告" 2>/dev/null || true
 fi
 
 # 2. 创建工作目录

@@ -1,5 +1,7 @@
 {
+  "_comment": "唯一账号配置入口。只维护这个文件；缺少必填账号或密码时，流程会直接中止。",
   "shuttle": {
+    "_comment": "必填：用于下载 deb/dbgsym 包",
     "name": "Shuttle UnionTech",
     "description": "用于从 shuttle.uniontech.com 下载 deb 包",
     "url": "https://shuttle.uniontech.com",
@@ -10,21 +12,20 @@
     }
   },
   "metabase": {
+    "_comment": "必填：用于下载崩溃数据",
     "name": "Metabase",
     "description": "用于下载崩溃数据",
     "url": "https://metabase.cicd.getdeepin.org",
-    "api_session": "/api/session",
-    "api_dataset": "/api/dataset",
     "account": {
       "username": "app@deepin.org",
       "password": "deepin123"
     },
     "database": {
-      "id": 10,
-      "source_table_id": 196
+      "id": 10
     }
   },
   "gerrit": {
+    "_comment": "必填：用于克隆和管理代码仓库",
     "name": "Gerrit",
     "description": "用于下载和管理代码仓库",
     "host": "gerrit.uniontech.com",
@@ -36,18 +37,21 @@
     "ssh_key": "~/.ssh/id_rsa"
   },
   "internal_server": {
+    "_comment": "非账号项：内部包服务静态地址，通常无需修改",
     "name": "内部构建服务器",
     "description": "用于从内部构建服务器下载 deb 包和 dbgsym",
     "url": "http://10.0.32.60:5001",
     "tasks_endpoint": "/tasks/"
   },
   "system": {
+    "_comment": "必填：当前登录账户的 sudo 密码",
     "name": "系统配置",
     "description": "系统级配置",
     "sudo_password": "在此处输入当前登录账户密码"
   },
   "paths": {
+    "_comment": "可选：默认工作目录根路径。不填时默认使用用户家目录。",
     "workspace": "",
-    "workspace_comment": "每次分析自动创建带时间戳的目录（~/coredump-workspace-YYYYMMDD-HHMMSS），无需手动配置"
+    "workspace_comment": "例如 /data/uos 或 /home/uos；实际运行目录会自动追加 coredump-workspace-YYYYMMDD-HHMMSS"
   }
 }

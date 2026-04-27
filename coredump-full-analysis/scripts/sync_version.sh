@@ -16,15 +16,9 @@ NC='\033[0m' # No Color
 
 # 加载配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# 首先尝试从 skills 目录加载配置
-SKILLS_CONFIG_DIR="/home/wubw/.nvm/versions/node/v24.14.1/lib/node_modules/openclaw/skills/coredump-full-analysis/config"
-
-source "$SKILLS_CONFIG_DIR/metabase.env" 2>/dev/null || true
-source "$SKILLS_CONFIG_DIR/gerrit.env" 2>/dev/null || true
-source "$SKILLS_CONFIG_DIR/package-server.env" 2>/dev/null || true
-source "$SKILLS_CONFIG_DIR/loop.env" 2>/dev/null || true
-source "$SKILLS_CONFIG_DIR/local.env" 2>/dev/null || true
+LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
+source "$LOAD_ACCOUNTS_SCRIPT"
+load_accounts_or_die gerrit system
 
 # 帮助信息
 show_help() {

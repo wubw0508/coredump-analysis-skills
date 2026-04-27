@@ -1,15 +1,16 @@
 #!/bin/bash
 #=============================================================================
-# dde-launcher 崩溃分析完整流程 - 支持进度持久化和并行分析
-#
-# 改进：
-# - 添加进度持久化 (--resume 支持中断恢复)
-# - 添加并行分析 (--parallel N)
-# - 所有 git 操作使用绝对路径
-# - 自动识别已修复版本
+# Legacy: dde-launcher 崩溃分析完整流程
+# 已弃用，保留文件名仅为兼容历史调用与排查旧记录
 #=============================================================================
 
 set -e
+
+echo "错误: $0 已弃用，不再维护。" >&2
+echo "请改用通用入口:" >&2
+echo "  bash run_analysis_agent.sh --packages dde-launcher --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD>" >&2
+echo "当前通用流程已覆盖下载、筛选、源码、包、逐版本分析与报告生成。" >&2
+exit 1
 
 # 配色
 RED='\033[0;31m'
@@ -26,7 +27,9 @@ FILTERED_CSV="$WORKSPACE/2.数据筛选/filtered_dde-launcher_crash_data.csv"
 STATS_JSON="$WORKSPACE/2.数据筛选/dde-launcher_crash_statistics.json"
 REPORT_FILE="$WORKSPACE/5.崩溃分析/dde-launcher_crash_analysis_report.md"
 PROGRESS_FILE="$WORKSPACE/5.崩溃分析/.analysis_progress.json"
-SUDO_PASSWORD="${SUDO_PASSWORD:-1}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/load_accounts.sh"
+load_accounts_or_die system
 
 # 并行分析数
 PARALLEL_JOBS="${PARALLEL_JOBS:-1}"
@@ -179,7 +182,7 @@ echo -e "${BLUE}================================================================
 echo -e "${CYAN}[1] 检查代码仓库${NC}"
 if [[ ! -d "$CODE_DIR/.git" ]]; then
     echo "克隆代码..."
-    git clone -b origin/develop/eagle ssh://wubw@gerrit.uniontech.com:29418/dde-launcher "$CODE_DIR"
+    git clone -b origin/develop/eagle "ssh://${GERRIT_USER}@${GERRIT_HOST}:${GERRIT_PORT}/dde-launcher" "$CODE_DIR"
 fi
 git -C "$CODE_DIR" fetch --tags origin 2>/dev/null || true
 

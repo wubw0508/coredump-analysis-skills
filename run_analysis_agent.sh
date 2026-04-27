@@ -1,7 +1,7 @@
 #!/bin/bash
 #=============================================================================
 # 崩溃分析 Agent 调用脚本
-# 用法: bash run_analysis_agent.sh --package dde-session-ui [--start-date 2026-03-14] [--end-date 2026-04-14] [--sys-version 1070-1075]
+# 用法: bash run_analysis_agent.sh --packages dde-session-ui [--start-date 2026-03-14] [--end-date 2026-04-14] [--sys-version 1070-1075]
 #=============================================================================
 
 set -e
@@ -15,7 +15,8 @@ NC='\033[0m'
 
 # 生成带时间戳的workspace路径
 generate_workspace_with_timestamp() {
-    echo "$HOME/coredump-workspace-$(date +%Y%m%d_%H%M%S)"
+    local root_dir="${1:-$HOME}"
+    echo "$root_dir/coredump-workspace-$(date +%Y%m%d_%H%M%S)"
 }
 
 # 默认值
@@ -25,11 +26,14 @@ END_DATE=""
 SYS_VERSION="1070-1075"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
 PACKAGES_FILE="$SKILLS_DIR/packages.txt"
+LOAD_ACCOUNTS_SCRIPT="$SKILLS_DIR/coredump-full-analysis/scripts/load_accounts.sh"
 
 ARCH="x86"
-WORKSPACE=$(generate_workspace_with_timestamp)
+WORKSPACE=""
 RUN_BACKGROUND=false
 PROGRESS_INTERVAL=0  # 0表示禁用进度监控，非0表示启用(秒)
+SUMMARY_DIR_NAME="6.总结报告"
+PACKAGE_STATUS_FILE=""
 
 # 显示帮助
 show_help() {
@@ -79,16 +83,19 @@ ${GREEN}示例:${NC}
     $0 --packages dde-control-center,dde-dock --progress 180
 
     # 分析 dde-dock 指定版本范围
-    $0 --package dde-dock --sys-version 1060-1075
+    $0 --packages dde-dock --sys-version 1060-1075
 
     # 后台运行
-    $0 --package dde-session-ui --background
+    $0 --packages dde-session-ui --background
 
     # 带进度监控 (每3分钟报告一次)
-    $0 --package dde-session-ui --progress
+    $0 --packages dde-session-ui --progress
 
     # 带进度监控 (每2分钟报告一次)
-    $0 --package dde-session-ui --progress 120
+    $0 --packages dde-session-ui --progress 120
+
+${GREEN}兼容说明:${NC}
+    仍兼容旧参数 --package，但新文档统一使用 --packages
 
 ${GREEN}输出文件:${NC}
     <workspace>/2.数据筛选/<package>_crash_statistics.json  - 统计报告
@@ -204,55 +211,25 @@ if [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
 fi
 echo ""
 
-# 从 accounts.json 读取凭据并写入环境配置
-CONFIG_FILE="$HOME/.openclaw/skills/coredump-analysis-skills/accounts.json"
-SETUP_ACCOUNTS_SCRIPT="$HOME/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts/setup_accounts.py"
-
-if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo -e "${RED}错误: 配置文件不存在: $CONFIG_FILE${NC}"
-    echo ""
-    echo -e "${YELLOW}请先配置账号信息，运行以下命令:${NC}"
-    echo "    python3 $SETUP_ACCOUNTS_SCRIPT"
+# 从 accounts.json 读取凭据
+if [[ ! -f "$LOAD_ACCOUNTS_SCRIPT" ]]; then
+    echo -e "${RED}错误: 账号加载脚本不存在: $LOAD_ACCOUNTS_SCRIPT${NC}"
     exit 1
 fi
+source "$LOAD_ACCOUNTS_SCRIPT"
+load_accounts_or_die metabase gerrit shuttle system
 
-if ! command -v jq &> /dev/null; then
-    echo -e "${RED}错误: jq 未安装，无法读取配置文件${NC}"
-    exit 1
+export GERRIT_USERNAME="$GERRIT_USER"
+
+if [[ -z "$WORKSPACE" ]]; then
+    local_workspace_root="${ACCOUNTS_WORKSPACE_ROOT:-$HOME}"
+    if [[ -z "$local_workspace_root" ]]; then
+        local_workspace_root="$HOME"
+    fi
+    WORKSPACE=$(generate_workspace_with_timestamp "$local_workspace_root")
 fi
 
-# 读取并验证账号配置
-export SHUTTLE_USERNAME=$(jq -r '.shuttle.account.username' "$CONFIG_FILE")
-export SHUTTLE_PASSWORD=$(jq -r '.shuttle.account.password' "$CONFIG_FILE")
-export GERRIT_USERNAME=$(jq -r '.gerrit.account.username' "$CONFIG_FILE")
-export GERRIT_PASSWORD=$(jq -r '.gerrit.account.password' "$CONFIG_FILE")
-export GERRIT_SSH_KEY=$(eval echo $(jq -r '.gerrit.ssh_key // "~/.ssh/id_rsa"' "$CONFIG_FILE"))
-export SUDO_PASSWORD=$(jq -r '.system.sudo_password' "$CONFIG_FILE")
-
-# 检查是否有占位符（未配置）
-PLACEHOLDER_PATTERN="在此处输入"
-if [[ -z "$GERRIT_USERNAME" || "$GERRIT_USERNAME" == "null" || "$GERRIT_USERNAME" == "$PLACEHOLDER_PATTERN"* ]]; then
-    echo -e "${RED}错误: Gerrit 用户名未配置${NC}"
-    echo ""
-    echo -e "${YELLOW}请先配置账号信息，运行以下命令:${NC}"
-    echo "    python3 $SETUP_ACCOUNTS_SCRIPT"
-    exit 1
-fi
-
-OPTIONAL_CONFIG_WARNINGS=()
-[[ -z "$SHUTTLE_USERNAME" || "$SHUTTLE_USERNAME" == "null" || "$SHUTTLE_USERNAME" == "$PLACEHOLDER_PATTERN"* ]] && OPTIONAL_CONFIG_WARNINGS+=("shuttle.username")
-[[ -z "$SHUTTLE_PASSWORD" || "$SHUTTLE_PASSWORD" == "null" || "$SHUTTLE_PASSWORD" == "$PLACEHOLDER_PATTERN"* ]] && OPTIONAL_CONFIG_WARNINGS+=("shuttle.password")
-[[ -z "$GERRIT_PASSWORD" || "$GERRIT_PASSWORD" == "null" || "$GERRIT_PASSWORD" == "$PLACEHOLDER_PATTERN"* ]] && OPTIONAL_CONFIG_WARNINGS+=("gerrit.password")
-
-if [[ ${#OPTIONAL_CONFIG_WARNINGS[@]} -gt 0 ]]; then
-    echo -e "${YELLOW}警告: 以下可选账号字段未配置，本次流程将继续使用 SSH/内部包服务:${NC}"
-    printf '  - %s\n' "${OPTIONAL_CONFIG_WARNINGS[@]}"
-fi
-
-# 生成环境配置文件
-echo -e "${YELLOW}从 accounts.json 写入配置...${NC}"
-python3 "$SETUP_ACCOUNTS_SCRIPT" --config "$CONFIG_FILE" 2>/dev/null || true
-echo -e "${GREEN}✅ 配置已写入${NC}"
+echo -e "${YELLOW}已从 accounts.json 加载账号配置${NC}"
 
 # 进度报告函数
 report_progress() {
@@ -299,6 +276,80 @@ report_progress() {
     echo ""
 }
 
+ensure_summary_dir() {
+    mkdir -p "$WORKSPACE/$SUMMARY_DIR_NAME"
+}
+
+write_run_context() {
+    ensure_summary_dir
+    python3 - "$WORKSPACE/$SUMMARY_DIR_NAME/run_context.json" <<'PY'
+import json
+import os
+import sys
+
+path = sys.argv[1]
+data = {
+    "workspace": os.environ.get("WORKSPACE", ""),
+    "packages": os.environ.get("PACKAGES", ""),
+    "arch": os.environ.get("ARCH", ""),
+    "sys_version": os.environ.get("SYS_VERSION", ""),
+    "start_date": os.environ.get("START_DATE", ""),
+    "end_date": os.environ.get("END_DATE", ""),
+    "date_range_label": os.environ.get("DATE_RANGE_LABEL", ""),
+    "summary_dir_name": os.environ.get("SUMMARY_DIR_NAME", ""),
+}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+PY
+}
+
+init_package_status_file() {
+    ensure_summary_dir
+    write_run_context
+    PACKAGE_STATUS_FILE="$WORKSPACE/$SUMMARY_DIR_NAME/package_status.tsv"
+    if [[ ! -f "$PACKAGE_STATUS_FILE" ]]; then
+        printf "#timestamp\tpackage\tstatus\texit_code\tmessage\n" > "$PACKAGE_STATUS_FILE"
+    fi
+}
+
+log_package_status() {
+    local package="$1"
+    local status="$2"
+    local exit_code="${3:-}"
+    local message="${4:-}"
+    ensure_summary_dir
+    printf "%s\t%s\t%s\t%s\t%s\n" \
+        "$(date '+%Y-%m-%dT%H:%M:%S')" \
+        "$package" \
+        "$status" \
+        "$exit_code" \
+        "$message" >> "$PACKAGE_STATUS_FILE"
+}
+
+generate_workspace_reports() {
+    local failed_csv="$1"
+    local summary_script="$SKILLS_DIR/coredump-full-analysis/scripts/generate_workspace_summary.py"
+    if [[ ! -f "$summary_script" ]]; then
+        echo -e "${YELLOW}⚠️ 未找到 workspace 汇总脚本: $summary_script${NC}"
+        return 0
+    fi
+
+    local failed_packages=""
+    if [[ -n "$failed_csv" ]]; then
+        failed_packages="$failed_csv"
+    fi
+
+    ensure_summary_dir
+    echo -e "${YELLOW}生成 workspace 汇总报告...${NC}"
+    python3 "$summary_script" \
+        --workspace "$WORKSPACE" \
+        --packages "$PACKAGES" \
+        --date-range-label "$DATE_RANGE_LABEL" \
+        --status-file "$PACKAGE_STATUS_FILE" \
+        --version-status-file "$WORKSPACE/$SUMMARY_DIR_NAME/version_status.tsv" \
+        --failed-packages "$failed_packages"
+}
+
 # 检查进程是否还在运行
 is_running() {
     kill -0 "$1" 2>/dev/null
@@ -307,33 +358,57 @@ is_running() {
 # 启动单个包的崩溃分析
 launch_package() {
     local pkg="$1"
-    local log_file="/tmp/analysis_${pkg}.log"
+    log_package_status "$pkg" "running" "" "analysis started"
     cd "$HOME/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts"
     local cmd=(bash analyze_crash_complete.sh
-        --package "$pkg"
+        --packages "$pkg"
         --arch "$ARCH"
         --sys-version "$SYS_VERSION"
         --workspace "$WORKSPACE")
     [[ -n "$START_DATE" ]] && cmd+=(--start-date "$START_DATE")
     [[ -n "$END_DATE" ]] && cmd+=(--end-date "$END_DATE")
-    SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" "${cmd[@]}" 2>&1
+    if SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" "${cmd[@]}" 2>&1; then
+        log_package_status "$pkg" "completed" "0" "analysis completed"
+        return 0
+    fi
+
+    local exit_code=$?
+    log_package_status "$pkg" "failed" "$exit_code" "analysis exited with failure"
+    return "$exit_code"
 }
 
 # 并行启动所有包的分析
 if [[ "$RUN_BACKGROUND" == "true" ]]; then
+    init_package_status_file
     echo -e "${YELLOW}后台运行模式${NC}"
     echo "并行启动 $PACKAGE_COUNT 个包的分析..."
+    declare -a PIDS
     for pkg in "${PACKAGE_ARRAY[@]}"; do
         launch_package "$pkg" > "/tmp/analysis_${pkg}.log" 2>&1 &
-        echo -e "${GREEN}✅ $pkg 已启动 (PID: $!)${NC}"
+        pid=$!
+        PIDS+=($pid)
+        echo -e "${GREEN}✅ $pkg 已启动 (PID: $pid)${NC}"
     done
+
+    (
+        overall_exit=0
+        for pid in "${PIDS[@]}"; do
+            wait "$pid" || overall_exit=$?
+        done
+        generate_workspace_reports "" >> "/tmp/analysis_workspace_summary.log" 2>&1
+        exit "$overall_exit"
+    ) &
+    summary_pid=$!
     echo ""
     echo "使用 'jobs' 查看后台任务，或查看各包日志:"
     for pkg in "${PACKAGE_ARRAY[@]}"; do
         echo "  tail -f /tmp/analysis_${pkg}.log  # $pkg"
     done
+    echo "  tail -f /tmp/analysis_workspace_summary.log  # workspace 汇总"
+    echo "  后台汇总进程 PID: $summary_pid"
 
 elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
+    init_package_status_file
     # 启用进度监控模式：并行启动所有包
     echo -e "${YELLOW}启用进度监控 (间隔: ${PROGRESS_INTERVAL}秒)${NC}"
     echo "并行启动 $PACKAGE_COUNT 个包的分析..."
@@ -402,7 +477,19 @@ elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
         echo "    筛选数据: $WORKSPACE/2.数据筛选/filtered_${pkg}_crash_data.csv"
         echo "    分析报告: $WORKSPACE/5.崩溃分析/${pkg}/"
     done
-    echo "  最终报告: $WORKSPACE/7.总结报告/final_conclusion.md"
+    generate_workspace_reports ""
+    echo "  Workspace汇总: $WORKSPACE/$SUMMARY_DIR_NAME/run_manifest.md"
+    echo "  跨包汇总: $WORKSPACE/$SUMMARY_DIR_NAME/all_packages_summary.md"
+    echo "  问题簇汇总: $WORKSPACE/$SUMMARY_DIR_NAME/root_cause_clusters.md"
+    echo "  失败包清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_packages.txt"
+    echo "  失败版本清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.md"
+    echo "  重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_commands.sh"
+    echo "  版本重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.sh"
+    echo "  失败步骤重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_failed_steps.sh"
+    echo "  闭环校验: python3 coredump-full-analysis/scripts/validate_workspace_retry_closure.py --workspace $WORKSPACE"
+    echo "  一键验收: bash coredump-full-analysis/scripts/validate_workspace.sh --workspace $WORKSPACE"
+    echo "  验收报告: $WORKSPACE/$SUMMARY_DIR_NAME/acceptance_report.txt"
+    echo "  验收状态: $WORKSPACE/$SUMMARY_DIR_NAME/acceptance_status.json"
 
     if [[ $ALL_EXIT_CODE -eq 0 ]]; then
         echo ""
@@ -415,6 +502,7 @@ elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
     exit $ALL_EXIT_CODE
 
 else
+    init_package_status_file
     # 前台顺序执行
     PACKAGE_IDX=1
     OVERALL_EXIT_CODE=0
@@ -434,10 +522,28 @@ else
         ((PACKAGE_IDX++)) || true
     done
 
+    failed_csv=""
+    if [[ ${#FAILED_PACKAGES[@]} -gt 0 ]]; then
+        failed_csv=$(printf "%s," "${FAILED_PACKAGES[@]}")
+        failed_csv="${failed_csv%,}"
+    fi
+    generate_workspace_reports "$failed_csv"
+
     if [[ ${#FAILED_PACKAGES[@]} -gt 0 ]]; then
         echo ""
         echo -e "${RED}以下包分析失败:${NC}"
         printf '  - %s\n' "${FAILED_PACKAGES[@]}"
+        echo ""
+        echo "Workspace汇总: $WORKSPACE/$SUMMARY_DIR_NAME/run_manifest.md"
+        echo "失败包清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_packages.txt"
+        echo "失败版本清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.md"
+        echo "重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_commands.sh"
+        echo "版本重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.sh"
+        echo "失败步骤重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_failed_steps.sh"
+        echo "闭环校验: python3 coredump-full-analysis/scripts/validate_workspace_retry_closure.py --workspace $WORKSPACE"
+        echo "一键验收: bash coredump-full-analysis/scripts/validate_workspace.sh --workspace $WORKSPACE"
+        echo "验收报告: $WORKSPACE/$SUMMARY_DIR_NAME/acceptance_report.txt"
+        echo "验收状态: $WORKSPACE/$SUMMARY_DIR_NAME/acceptance_status.json"
         exit "$OVERALL_EXIT_CODE"
     fi
 fi

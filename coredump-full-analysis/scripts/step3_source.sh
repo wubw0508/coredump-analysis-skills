@@ -24,10 +24,11 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$SCRIPT_DIR/../config"
-GERRIT_URL="ssh://ut000168@gerrit.uniontech.com:29418"
-
-# 加载配置
-source "$CONFIG_DIR/gerrit.env" 2>/dev/null || true
+LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
+source "$LOAD_ACCOUNTS_SCRIPT"
+load_accounts_or_die gerrit
+GERRIT_URL="ssh://${GERRIT_USER}@${GERRIT_HOST}:${GERRIT_PORT}"
+GIT_SSH_COMMAND_DEFAULT="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=8"
 
 echo "=========================================="
 echo "步骤3: 代码管理 - 克隆源码"
@@ -51,7 +52,7 @@ else
     echo "克隆源码仓库..."
     cd "$WORKSPACE/3.代码管理"
     # 尝试克隆
-    if git clone "${GERRIT_URL}/${PACKAGE}.git" "$PACKAGE" 2>/dev/null; then
+    if GIT_SSH_COMMAND="$GIT_SSH_COMMAND_DEFAULT" git clone "${GERRIT_URL}/${PACKAGE}.git" "$PACKAGE" 2>/dev/null; then
         echo "✅ 克隆成功"
     else
         echo "⚠️ 克隆失败，尝试从其他源..."

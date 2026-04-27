@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 from datetime import datetime
 
+from package_rules import get_package_patterns
+
 
 def parse_args():
     """解析命令行参数"""
@@ -47,8 +49,8 @@ def parse_args():
     parser.add_argument(
         '--max-crashes',
         type=int,
-        default=50,
-        help='最大分析崩溃数量（默认: 50）'
+        default=0,
+        help='最大分析崩溃数量（默认: 0，表示分析全部）'
     )
 
     return parser.parse_args()
@@ -71,7 +73,7 @@ def parse_stack_info(stack_info: str) -> List[Dict]:
 
     for line in lines:
         # 匹配: #0 0x000055c65fa3409b symbol (library)
-        match = re.match(r'#\s*\d+\s+0x[0-9a-f]+\s+(\S+|n/a)\s+\(([^)]*)\)', line)
+        match = re.match(r'\s*#\s*\d+\s+0x[0-9a-f]+\s+(\S+|n/a)\s+\(([^)]*)\)', line)
         if match:
             frames.append({
                 'symbol': match.group(1),
@@ -86,7 +88,8 @@ def find_app_layer_symbol(frames: List[Dict], package: str) -> Tuple[Dict, int]:
     system_libs = ['libc.so.6', 'libpthread.so.0', 'libstdc++.so.6', 'ld-linux', 'libm.so.6',
                    'libglib-2.0.so.0', 'libgobject-2.0.so.0', 'libgio-2.0.so.0']
 
-    package_keywords = package.split('-')
+    package_keywords = [kw for kw in package.split('-') if kw]
+    package_keywords.append(package)
 
     for i, frame in enumerate(frames):
         library = frame['library'].lower()
@@ -98,8 +101,18 @@ def find_app_layer_symbol(frames: List[Dict], package: str) -> Tuple[Dict, int]:
 
         # 检查是否为应用层代码
         for keyword in package_keywords:
-            if keyword in library:
+            keyword = keyword.lower()
+            if keyword in library or keyword in symbol.lower():
                 return frame, i
+
+    # 回退: 选择第一个非系统库帧
+    for i, frame in enumerate(frames):
+        library = frame['library'].lower()
+        symbol = frame['symbol'].lower()
+        if symbol == 'n/a' and ('n/a' == library or 'n/a + 0x0' in library):
+            continue
+        if not any(sys_lib in library for sys_lib in system_libs):
+            return frame, i
 
     return frames[0] if frames else {}, 0
 
@@ -201,6 +214,50 @@ def assess_fixability(crash_data: Dict) -> Dict:
     }
 
 
+def infer_crash_pattern(crash: Dict, package: str) -> Dict:
+    """根据堆栈模式推断更具体的根因类别"""
+    frames = crash.get('frames', [])
+    text = ' | '.join(f"{f.get('library', '')}:{f.get('symbol', '')}" for f in frames[:8]).lower()
+    key_frame = crash.get('key_frame') or {}
+    key_symbol = (key_frame.get('symbol') or '').lower()
+    key_library = (key_frame.get('library') or '').lower()
+
+    patterns = get_package_patterns(package)
+
+    for pattern in patterns:
+        if all(token in text for token in pattern['match']):
+            return pattern
+
+    if text.count('n/a + 0x0') >= 2 or text.count('n/a:n/a') >= 2 or text.strip() in {'n/a:n/a', 'n/a + 0x0:n/a | n/a + 0x0:n/a'}:
+        return {
+            'name': 'opaque_no_symbols',
+            'fixable': 'uncertain',
+            'reason': '堆栈缺少可用符号，需原始 coredump 或更完整调试符号',
+            'fix_type': None,
+            'fix_code': None,
+            'confidence': 'low',
+        }
+
+    if package.lower() in key_library or package.lower() in key_symbol:
+        return {
+            'name': 'app_frame_detected',
+            'fixable': True,
+            'reason': '已命中应用层关键帧，可继续结合源码定位',
+            'fix_type': '优先分析应用层关键帧附近代码',
+            'fix_code': None,
+            'confidence': 'low',
+        }
+
+    return {
+        'name': 'unknown',
+        'fixable': 'uncertain',
+        'reason': '需要人工判断',
+        'fix_type': None,
+        'fix_code': None,
+        'confidence': 'low',
+    }
+
+
 def analyze_crash(row: Dict, package: str) -> Dict:
     """分析单个崩溃"""
     crash = {
@@ -212,7 +269,8 @@ def analyze_crash(row: Dict, package: str) -> Dict:
         'stack_info': row.get('StackInfo', ''),
         'app_layer_library': row.get('App_Layer_Library', ''),
         'app_layer_symbol': row.get('App_Layer_Symbol', ''),
-        'sys_v_number': row.get('Sys_V_Number', ''),
+        'sys_v_number': row.get('Sys V Number', row.get('Sys_V_Number', '')),
+        'buildid': row.get('Buildid', ''),
     }
 
     # 信号类型分析
@@ -247,11 +305,16 @@ def analyze_crash(row: Dict, package: str) -> Dict:
     crash['description'] = description
 
     fix_assessment = assess_fixability(crash)
+    pattern_assessment = infer_crash_pattern(crash, package)
+    if fix_assessment['fixable'] == 'uncertain' and pattern_assessment['fixable'] != 'uncertain':
+        fix_assessment = pattern_assessment
+
     crash['fixable'] = fix_assessment['fixable']
     crash['fix_reason'] = fix_assessment['reason']
     crash['fix_type'] = fix_assessment.get('fix_type')
     crash['fix_code'] = fix_assessment.get('fix_code')
     crash['fix_confidence'] = fix_assessment['confidence']
+    crash['pattern_name'] = pattern_assessment.get('name', 'unknown')
 
     return crash
 
@@ -269,6 +332,17 @@ def generate_gdb_commands(crash: Dict) -> List[str]:
         commands.append("(gdb) info locals")
         commands.append("(gdb) info args")
 
+    return commands
+
+
+def generate_addr2line_commands(crash: Dict) -> List[str]:
+    """生成 addr2line 调试命令"""
+    commands = []
+    buildid = crash.get('buildid', '')
+    if buildid and len(buildid) > 2:
+        debug_file = f"/usr/lib/debug/.build-id/{buildid[:2]}/{buildid[2:]}.debug"
+        commands.append(f"file {debug_file}")
+        commands.append(f"eu-addr2line -e {debug_file} <crash-address>")
     return commands
 
 
@@ -343,7 +417,7 @@ def analyze_version(package: str, version: str, workspace: str, max_crashes: int
                 total_crash_count += crash['count']
 
     # 限制分析的崩溃数量
-    analyzed_crashes = crashes[:max_crashes]
+    analyzed_crashes = crashes if max_crashes <= 0 else crashes[:max_crashes]
 
     # 统计
     total_fixable = sum(1 for c in analyzed_crashes if c['fixable'] is True)
@@ -434,7 +508,7 @@ def save_markdown_report(analysis: Dict, output_file: Path):
         f.write("## 崩溃详情\n\n")
         f.write(f"共分析 {analysis['summary']['unique_crashes']} 个唯一崩溃:\n\n")
 
-        for i, crash in enumerate(analysis['crashes'][:20], 1):  # 只显示前20个
+        for i, crash in enumerate(analysis['crashes'], 1):
             f.write(f"### 崩溃 #{i}\n\n")
             f.write(f"- **ID**: {crash['id'][:50]}...\n")
             f.write(f"- **次数**: {crash['count']}\n")
@@ -461,6 +535,13 @@ def save_markdown_report(analysis: Dict, output_file: Path):
             if gdb_cmds:
                 f.write(f"\n**调试命令**:\n```bash\n")
                 for cmd in gdb_cmds:
+                    f.write(f"{cmd}\n")
+                f.write("```\n")
+
+            addr2line_cmds = generate_addr2line_commands(crash)
+            if addr2line_cmds:
+                f.write(f"\n**addr2line 命令**:\n```bash\n")
+                for cmd in addr2line_cmds:
                     f.write(f"{cmd}\n")
                 f.write("```\n")
 

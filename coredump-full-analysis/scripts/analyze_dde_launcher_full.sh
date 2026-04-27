@@ -1,9 +1,17 @@
 #!/bin/bash
 #=============================================================================
-# dde-launcher 崩溃分析完整自动化脚本
+# Legacy: dde-launcher 崩溃分析完整自动化脚本
+# 已弃用，保留文件名仅为兼容历史调用与排查旧记录
 #=============================================================================
 
 set -e
+
+echo "错误: $0 已弃用，不再维护。" >&2
+echo "请改用通用入口:" >&2
+echo "  bash run_analysis_agent.sh --packages dde-launcher --start-date <YYYY-MM-DD> --end-date <YYYY-MM-DD>" >&2
+echo "或按步骤调用:" >&2
+echo "  bash coredump-full-analysis/scripts/analyze_crash_complete.sh --package dde-launcher [--start-date ...] [--end-date ...]" >&2
+exit 1
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -17,7 +25,9 @@ CODE_DIR="$WORKSPACE/3.代码管理/dde-launcher"
 FILTERED_CSV="$WORKSPACE/2.数据筛选/filtered_dde-launcher_crash_data.csv"
 STATS_JSON="$WORKSPACE/2.数据筛选/dde-launcher_crash_statistics.json"
 REPORT_FILE="$WORKSPACE/5.崩溃分析/dde-launcher_crash_analysis_report.md"
-SUDO_PASSWORD="${SUDO_PASSWORD:-1}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/load_accounts.sh"
+load_accounts_or_die system gerrit
 
 echo -e "${BLUE}=============================================================================${NC}"
 echo -e "${BLUE}       dde-launcher 崩溃分析完整自动化流程${NC}"
@@ -27,7 +37,7 @@ echo -e "${BLUE}================================================================
 echo -e "${CYAN}[步骤1] 检查代码仓库${NC}"
 if [[ ! -d "$CODE_DIR/.git" ]]; then
     echo "克隆代码..."
-    git clone -b origin/develop/eagle ssh://wubw@gerrit.uniontech.com:29418/dde-launcher "$CODE_DIR"
+    git clone -b origin/develop/eagle "ssh://${GERRIT_USER}@${GERRIT_HOST}:${GERRIT_PORT}/dde-launcher" "$CODE_DIR"
 else
     cd "$CODE_DIR" && git fetch --tags origin 2>/dev/null || true
     echo "代码仓库就绪"

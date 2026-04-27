@@ -99,8 +99,12 @@ def generate_version_list(stats_file: Path, output_file: Path, min_count: int,
     # 转换为列表
     versions_list: List[Dict] = []
     for version, data in by_version.items():
-        total_crashes = data.get('total_crashes', 0)
-        unique_crashes = data.get('unique_crashes', 0)
+        if isinstance(data, dict):
+            total_crashes = data.get('total_crashes', 0)
+            unique_crashes = data.get('unique_crashes', 0)
+        else:
+            total_crashes = int(data or 0)
+            unique_crashes = 0
 
         versions_list.append({
             'version': version,

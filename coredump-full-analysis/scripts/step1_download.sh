@@ -15,9 +15,10 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$SCRIPT_DIR/../config"
 SKILLS_DATA_DOWNLOAD="$SCRIPT_DIR/../../coredump-data-download/scripts"
+LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
 
-# 加载配置
-source "$CONFIG_DIR/metabase.env" 2>/dev/null || true
+source "$LOAD_ACCOUNTS_SCRIPT"
+load_accounts_or_die metabase
 
 # 默认值
 PACKAGE="${PACKAGE:-}"

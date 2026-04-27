@@ -277,10 +277,11 @@ def generate_markdown_report(package: str, versions: List[Dict], version_list: L
                     version_analysis = next((v for v in versions if v.get('version') == vp['version']), None)
                     if version_analysis:
                         summary = version_analysis.get('summary', {})
+                        version_dir = version_analysis.get('version_dir') or clean_version(vp['version']).replace('.', '_')
                         f.write(f"**{vp['version']}** ({vp['count']} 次崩溃)\n")
                         f.write(f"- 可修复: {summary.get('fixable_count', 0)}\n")
                         f.write(f"- 不可修复: {summary.get('non_fixable_count', 0)}\n")
-                        f.write(f"- 分析报告: `5.崩溃分析/{clean_version(vp['version']).replace('.', '_')}/analysis_report.md`\n\n")
+                        f.write(f"- 分析报告: `5.崩溃分析/{package}/version_{version_dir}/analysis_report.md`\n\n")
 
             medium_priority = [v for v in version_list if v.get('priority') == 'medium']
             if medium_priority:
@@ -295,7 +296,9 @@ def generate_markdown_report(package: str, versions: List[Dict], version_list: L
         for version in versions:
             for crash in version.get('crashes', []):
                 if crash.get('fixable') is True:
-                    key = f"{crash.get('signal', '')}|{crash.get('app_layer_symbol', 'unknown')}"
+                    key_frame = crash.get('key_frame') or {}
+                    symbol = crash.get('app_layer_symbol') or key_frame.get('symbol') or crash.get('pattern_name') or 'unknown'
+                    key = (crash.get('signal', ''), symbol)
                     fixable_crashes[key] = fixable_crashes.get(key, 0) + crash.get('count', 1)
 
         if fixable_crashes:

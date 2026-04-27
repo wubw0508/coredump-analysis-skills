@@ -405,18 +405,13 @@ crash_report = report_gen.generate_crash_fix_mapping_report(
 
 ## 注意事项
 
-1. **首次运行**：必须先运行 `python3 coredump-full-analysis/scripts/setup_accounts.py` 配置账号
+1. **首次运行**：必须先完善 `accounts.json` 中的账号配置
 2. **SSH 密钥**：确保 Gerrit SSH 密钥配置正确
 3. **网络要求**：需要访问 Metabase、Gerrit、Shuttle 服务器
 4. **磁盘空间**：大数据量可能占用数 GB 空间
 5. **执行时间**：取决于数据量，通常 5-30 分钟
 
 ## 故障排除
-
-**Q: 配置脚本提示权限错误**
-```bash
-chmod +x coredump-full-analysis/scripts/setup_accounts.py
-```
 
 **Q: Gerrit 克隆失败**
 - 检查 SSH 密钥: `ls -la ~/.ssh/id_rsa`

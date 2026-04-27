@@ -14,6 +14,9 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
+
 # 帮助信息
 show_help() {
     cat << EOF
@@ -31,7 +34,6 @@ ${GREEN}选项:${NC}
     --only-dbgsym         仅安装dbgsym包
     --no-dbgsym           不安装dbgsym包
     --force               强制安装，忽略已安装检查
-    --sudo-password <pwd> sudo密码（如果需要）
     --help, -h            显示此帮助信息
 
 ${GREEN}示例:${NC}
@@ -58,6 +60,7 @@ parse_args() {
     NO_DBGsym=false
     FORCE=false
     SUDO_PASSWORD=""
+    CLI_SUDO_PASSWORD=""
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -86,7 +89,7 @@ parse_args() {
                 shift
                 ;;
             --sudo-password)
-                SUDO_PASSWORD="$2"
+                CLI_SUDO_PASSWORD="$2"
                 shift 2
                 ;;
             --help|-h)
@@ -112,6 +115,22 @@ parse_args() {
     if [[ ! -d "$DOWNLOAD_DIR" ]]; then
         echo -e "${RED}错误: 下载目录不存在: $DOWNLOAD_DIR${NC}"
         exit 1
+    fi
+}
+
+load_system_account() {
+    if [[ ! -f "$LOAD_ACCOUNTS_SCRIPT" ]]; then
+        echo -e "${RED}错误: 账号加载脚本不存在: $LOAD_ACCOUNTS_SCRIPT${NC}"
+        exit 1
+    fi
+
+    # shellcheck source=/dev/null
+    source "$LOAD_ACCOUNTS_SCRIPT"
+    load_accounts_or_die system
+    SUDO_PASSWORD="$SUDO_PASSWORD"
+
+    if [[ -n "$CLI_SUDO_PASSWORD" ]]; then
+        echo -e "${YELLOW}警告: --sudo-password 已废弃，运行时统一从 accounts.json 读取 system.sudo_password${NC}"
     fi
 }
 
@@ -231,6 +250,7 @@ install_deb() {
 # 主函数
 main() {
     parse_args "$@"
+    load_system_account
 
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

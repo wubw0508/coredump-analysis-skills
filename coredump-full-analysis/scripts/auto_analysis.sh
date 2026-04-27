@@ -138,7 +138,7 @@ check_dependencies() {
     mkdir -p "$WORKSPACE/4.包管理/downloads"
     mkdir -p "$WORKSPACE/5.符号化分析"
     mkdir -p "$WORKSPACE/6.修复与建议"
-    mkdir -p "$WORKSPACE/7.总结报告"
+    mkdir -p "$WORKSPACE/6.总结报告"
 
     echo -e "${GREEN}✓ 依赖检查完成${NC}"
     echo "  工作目录: $WORKSPACE"
@@ -306,13 +306,15 @@ PYTHON_SCRIPT_END
 
     # 克隆仓库
     if [[ ! -d "$source_dir" ]]; then
+        source "$SCRIPT_DIR/load_accounts.sh"
+        load_accounts_or_die gerrit
         echo "克隆 $PACKAGE 源码..."
-        git clone ssh://ut000168@gerrit.uniontech.com:29418/${PACKAGE} "$source_dir" || {
+        git clone "ssh://${GERRIT_USER}@${GERRIT_HOST}:${GERRIT_PORT}/${PACKAGE}" "$source_dir" || {
             echo -e "${YELLOW}错误: 克隆失败，跳过源码管理${NC}"
             return 1
         }
 
-        scp -p -P 29418 ut000168@gerrit.uniontech.com:hooks/commit-msg "$source_dir/.git/hooks/" 2>/dev/null || true
+        scp -p -P "$GERRIT_PORT" "${GERRIT_USER}@${GERRIT_HOST}:hooks/commit-msg" "$source_dir/.git/hooks/" 2>/dev/null || true
     fi
 
     if [[ ! -d "$source_dir" ]]; then
@@ -689,7 +691,7 @@ step8_generate_report() {
     print_step 8 "生成总结报告"
 
     local source_dir="$2"
-    local report_file="$WORKSPACE/7.总结报告/${PACKAGE}_analysis_report.md"
+    local report_file="$WORKSPACE/6.总结报告/${PACKAGE}_analysis_report.md"
 
     mkdir -p "$(dirname "$report_file")"
 
@@ -855,7 +857,7 @@ main() {
     echo "=========================================================================="
     echo -e "${NC}"
     echo "  工作目录: $WORKSPACE"
-    echo "  总结报告: $WORKSPACE/7.总结报告/${PACKAGE}_analysis_report.md"
+    echo "  总结报告: $WORKSPACE/6.总结报告/${PACKAGE}_analysis_report.md"
     echo ""
 }
 

@@ -256,7 +256,7 @@ report_progress $TOTAL_ELAPSED
 echo -e "${GREEN}输出文件:${NC}"
 echo "  统计报告: $WORKSPACE/2.数据筛选/${PACKAGE}_crash_statistics.json"
 echo "  筛选数据: $WORKSPACE/2.数据筛选/filtered_${PACKAGE}_crash_data.csv"
-echo "  最终报告: $WORKSPACE/7.总结报告/final_conclusion.md"
+echo "  最终报告: $WORKSPACE/6.总结报告/final_conclusion.md"
 
 if [[ $EXIT_CODE -eq 0 ]]; then
     echo ""

@@ -7,9 +7,8 @@ DDE/UOS 崩溃数据分析工具集，提供从数据下载、筛选去重、源
 **`accounts.json` 是唯一的账号配置入口**，所有需要人工配置的数据都集中在这里。
 
 **每次崩溃分析启动时，系统会自动检查 `accounts.json`**：
-- ✅ Gerrit 用户名有效 → 正常执行分析
-- ❌ Gerrit 用户名缺失或仍是占位符 → 中止并提示配置
-- ⚠️ Shuttle、Gerrit 密码、sudo 密码缺失 → 给出警告但继续执行；无法安装调试包时会跳过 deb/dbgsym 下载与安装，仍基于崩溃数据生成分析报告
+- ✅ 必需账号和密码齐全 → 正常执行分析
+- ❌ `metabase` / `gerrit` / `shuttle` / `system.sudo_password` 任一缺失或仍是占位符 → 立即中止并提示配置
 
 **accounts.json 文件路径**：
 ```
@@ -18,20 +17,20 @@ DDE/UOS 崩溃数据分析工具集，提供从数据下载、筛选去重、源
 
 **如需更新账号**：
 ```bash
-# 交互式编辑账号配置
-python3 coredump-full-analysis/scripts/setup_accounts.py
+# 直接编辑账号配置文件
+vi ~/.openclaw/skills/coredump-analysis-skills/accounts.json
 ```
 
 **配置项说明**：
 | 服务 | 字段 | 说明 |
 |------|------|------|
-| **Shuttle** | `shuttle.account` | 下载 deb/dbgsym 包（可选；无 sudo 安装能力时会跳过包下载） |
-| **Gerrit** | `gerrit.account` | 克隆源码仓库（至少需要用户名；优先使用 SSH/本机凭据） |
-| **Metabase** | `metabase.account` | 下载崩溃数据（已有默认账号） |
-| **System** | `system.sudo_password` | 安装调试符号包时需要（可选；无密码且无免密 sudo 时跳过安装） |
+| **Shuttle** | `shuttle.account` | 下载 deb/dbgsym 包，必填 |
+| **Gerrit** | `gerrit.account` | 克隆源码仓库，必填 |
+| **Metabase** | `metabase.account` | 下载崩溃数据，必填 |
+| **System** | `system.sudo_password` | 安装调试符号包时需要，必填 |
+| **Paths** | `paths.workspace` | 可选的默认工作目录根路径；不填则使用 `$HOME` |
 
 > **提示**：迁移到新机器后、或长时间未使用后，首次分析前务必检查 `accounts.json` 中的账号是否过期或失效。
-> **paths.workspace** 无需配置，每次分析自动创建带时间戳的目录。
 
 ---
 
@@ -50,6 +49,8 @@ coredump-analysis-skills/
 ├── coredump-crash-analysis/      # 崩溃分析
 └── coredump-full-analysis/       # 完整流程
 ```
+
+补充说明：`coredump-full-analysis/config/` 目录中仅保留运行时仍需要的静态配置文件；账号信息统一只保存在仓库根目录 `accounts.json`。
 
 ## Skills 列表
 
@@ -93,10 +94,11 @@ bash run_analysis_agent.sh --packages dde-dock,dde-launcher
 ├── 4.包管理/
 ├── 5.崩溃分析/
 ├── 6.修复补丁/
-└── 7.总结报告/
+└── 6.总结报告/
 ```
 
 - **不指定 `--workspace`** → 自动创建带时间戳的 `~/coredump-workspace-*`
+- **如配置 `accounts.json.paths.workspace`** → 自动创建到该目录下的 `coredump-workspace-*`
 - **指定 `--workspace /path`** → 使用指定目录
 
 ## Agent 使用（⭐推荐）
@@ -133,8 +135,8 @@ bash run_analysis_agent.sh --help
 - 支持多架构（x86, x86_64, arm64）
 - 支持自定义日期范围、系统版本
 - 后台运行模式
-- 自动使用预设账号（分析前检查 Gerrit 用户名；其余账号缺失时降级继续）
-- 无 sudo 密码且当前用户无免密 sudo 时，跳过 deb/dbgsym 下载与安装，仍生成数据筛选和 AI 分析报告
+- 自动从 `accounts.json` 读取账号
+- 账号或密码缺失时立即暂停流程，不做降级继续
 - deb/dbgsym 版本匹配支持 `-1`、`+build`、`.1-1` 等 Debian 构建后缀
 
 ## 快速开始
@@ -142,8 +144,8 @@ bash run_analysis_agent.sh --help
 ### 方式1: Agent 一键分析（⭐推荐）
 
 ```bash
-# 1. ⚠️ 每次分析前检查账号是否有效
-python3 coredump-full-analysis/scripts/setup_accounts.py --show
+# 1. ⚠️ 每次分析前检查 accounts.json 是否已填完整
+sed -n '1,160p' ~/.openclaw/skills/coredump-analysis-skills/accounts.json
 
 # 2. 使用 Agent 执行完整分析（默认所有能下载的数据）
 bash run_analysis_agent.sh --packages dde-session-shell
@@ -155,8 +157,8 @@ bash run_analysis_agent.sh --packages dde-session-shell --start-date 2026-03-10 
 ### 方式2: 手动完整流程（跳过 Agent 直接调用脚本）
 
 ```bash
-# ⚠️ 每次分析前检查账号
-python3 coredump-full-analysis/scripts/setup_accounts.py --show
+# ⚠️ 每次分析前检查 accounts.json
+sed -n '1,160p' ~/.openclaw/skills/coredump-analysis-skills/accounts.json
 
 # 执行完整分析（自动创建带时间戳的工作目录，默认所有能下载的数据）
 bash coredump-full-analysis/scripts/analyze_crash_complete.sh \
@@ -210,9 +212,25 @@ python3 analyze_crash_final.py --package dde-dock
 - **日期范围**：不传 `--start-date` / `--end-date` 时，不再默认最近 7 天或最近 30 天，而是下载接口当前能返回的全部崩溃数据。
 - **多包全量**：`bash run_analysis_agent.sh` 会读取 `packages.txt` 中 24 个默认项目逐个分析；某个包失败不会阻断后续包，最终会列出失败包。
 - **报告位置**：每个包的独立报告位于 `<workspace>/5.崩溃分析/<package>/`，包括 `AI_analysis_report.md`、`full_analysis_report.md` 和各版本 `version_*/analysis_report.md`。
-- **共享总结**：`<workspace>/7.总结报告/final_conclusion.md` 和 `summary_statistics.json` 是当前包的总结文件，多包顺序分析时会被后续包覆盖；以每个包目录下的报告作为主要产物。
-- **无 sudo 降级**：没有有效 `system.sudo_password` 且用户无免密 sudo 时，脚本跳过 deb/dbgsym 下载和安装，不再卡在 sudo 密码提示。
+- **共享总结**：`<workspace>/6.总结报告/final_conclusion.md` 和 `summary_statistics.json` 是当前包的总结文件，多包顺序分析时会被后续包覆盖；以每个包目录下的报告作为主要产物。
+- **账号必填**：`accounts.json` 中 `metabase` / `gerrit` / `shuttle` / `system.sudo_password` 任一缺失时，流程会直接中止。
 - **源码失败降级**：源码克隆或版本 tag 不可用时，脚本仍基于已下载和筛选的崩溃数据生成分析报告。
+- **参数约定**：Agent 入口文档统一使用 `--packages`；`--package` 仅作为兼容别名保留。
+
+## Legacy 脚本说明
+
+- `coredump-full-analysis/scripts/analyze_dde_launcher_auto.sh`
+- `coredump-full-analysis/scripts/analyze_dde_launcher_full.sh`
+- `coredump-full-analysis/scripts/analyze_all_versions.sh`
+
+以上脚本属于早期 `dde-launcher` 专项流程，内部包含硬编码工作目录、版本映射和应用特定逻辑，已经不再作为主链路维护。
+
+当前统一入口只有两类：
+
+- `bash run_analysis_agent.sh ...`
+- `bash coredump-full-analysis/scripts/analyze_crash_complete.sh ...`
+
+如果需要给新包增加专项分析能力，请在 `coredump-full-analysis/scripts/rules/` 下新增规则模块，而不是复制一份新的专项脚本。
 
 ## 技能打包与安装
 
@@ -275,7 +293,7 @@ python3 install_skill.py /path/to/skills/ --batch
 
 首次使用前配置账号：
 ```bash
-python3 coredump-full-analysis/scripts/setup_accounts.py
+vi ~/.openclaw/skills/coredump-analysis-skills/accounts.json
 ```
 
 账号配置文件路径：
@@ -284,9 +302,9 @@ python3 coredump-full-analysis/scripts/setup_accounts.py
 ```
 
 **关键配置项**：
-- `shuttle.account` — Shuttle 下载账号（可选；无 sudo 安装能力时跳过 deb/dbgsym）
-- `gerrit.account` — Gerrit 代码仓库账号（至少需要用户名）
-- `metabase.account` — Metabase 崩溃数据账号
-- `system.sudo_password` — 本机 sudo 密码（可选；无密码且无免密 sudo 时跳过安装调试符号）
+- `shuttle.account` — Shuttle 下载账号，必填
+- `gerrit.account` — Gerrit 代码仓库账号，必填
+- `metabase.account` — Metabase 崩溃数据账号，必填
+- `system.sudo_password` — 本机 sudo 密码，必填
 
-**自动检查**：每次分析启动时自动检查 `accounts.json`。Gerrit 用户名缺失会中止；Shuttle、Gerrit 密码或 sudo 密码缺失只警告并降级继续。
+**自动检查**：每次分析启动时自动检查 `accounts.json`。`metabase` / `gerrit` / `shuttle` / `system.sudo_password` 任一缺失或仍是占位符时，流程立即中止。
