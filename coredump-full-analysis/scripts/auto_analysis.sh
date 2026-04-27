@@ -31,8 +31,8 @@ ${BLUE}=========================================================================
 
 选项:
   --package <name>       包名（必需）
-  --start-date <date>   开始日期 (YYYY-MM-DD)
-  --end-date <date>     结束日期 (YYYY-MM-DD)
+  --start-date <date>   开始日期 (YYYY-MM-DD；默认不限制)
+  --end-date <date>     结束日期 (YYYY-MM-DD；默认不限制)
   --sys-version <ver>   系统版本 (默认: 1070-1075)
   --workspace <dir>      工作目录 (默认: ./coredump_workspace)
   --target-branch <br>  目标分支 (默认: develop/eagle)
@@ -100,13 +100,6 @@ parse_args() {
     SYS_VERSION="${SYS_VERSION:-$DEFAULT_SYS_VERSION}"
     TARGET_BRANCH="${TARGET_BRANCH:-$DEFAULT_TARGET_BRANCH}"
 
-    if [[ -z "$START_DATE" ]]; then
-        START_DATE=$(date -d '1 month ago' +%Y-%m-%d 2>/dev/null || date -v-1m +%Y-%m-%d 2>/dev/null || date +%Y-%m-01)
-    fi
-    if [[ -z "$END_DATE" ]]; then
-        END_DATE=$(date +%Y-%m-%d)
-    fi
-
     if [[ -z "$PACKAGE" ]]; then
         echo -e "${RED}错误: 必须指定 --package 参数${NC}"
         show_help
@@ -149,7 +142,15 @@ check_dependencies() {
 
     echo -e "${GREEN}✓ 依赖检查完成${NC}"
     echo "  工作目录: $WORKSPACE"
-    echo "  分析时间: $START_DATE 至 $END_DATE"
+    if [[ -z "$START_DATE" && -z "$END_DATE" ]]; then
+        echo "  分析时间: 全部可下载数据（不按日期过滤）"
+    elif [[ -n "$START_DATE" && -n "$END_DATE" ]]; then
+        echo "  分析时间: $START_DATE 至 $END_DATE"
+    elif [[ -n "$START_DATE" ]]; then
+        echo "  分析时间: $START_DATE 至 最新可下载"
+    else
+        echo "  分析时间: 最早可下载 至 $END_DATE"
+    fi
     echo "  系统版本: $SYS_VERSION"
     echo "  分析版本数: $DEFAULT_MAX_VERSIONS"
 }

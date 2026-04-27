@@ -40,8 +40,8 @@ ${GREEN}用法:${NC}
 
 ${GREEN}选项:${NC}
     --package <name>       包名（必需）
-    --start-date <date>   开始日期（格式: YYYY-MM-DD）
-    --end-date <date>     结束日期（格式: YYYY-MM-DD）
+    --start-date <date>   开始日期（格式: YYYY-MM-DD；默认不限制）
+    --end-date <date>     结束日期（格式: YYYY-MM-DD；默认不限制）
     --sys-version <ver>   系统版本范围（默认: 1070-1075）
     --workspace <dir>      工作目录（默认: 自动创建带时间戳的目录 ~/coredump-workspace-YYYYMMDD-HHMMSS）
     --help, -h            显示此帮助信息
@@ -95,17 +95,21 @@ if [[ -z "$PACKAGE" ]]; then
     exit 1
 fi
 
-# 默认日期：如果未指定，使用最近30天
-if [[ -z "$START_DATE" ]]; then
-    START_DATE=$(date -d '30 days ago' +%Y-%m-%d)
-    END_DATE=$(date +%Y-%m-%d)
-    echo -e "${YELLOW}使用默认日期范围: $START_DATE 至 $END_DATE${NC}"
-fi
-
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}步骤1: 数据下载${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+if [[ -z "$START_DATE" && -z "$END_DATE" ]]; then
+    echo -e "${YELLOW}日期范围: 全部可下载数据（不按日期过滤）${NC}"
+elif [[ -n "$START_DATE" && -n "$END_DATE" ]]; then
+    echo -e "${YELLOW}日期范围: $START_DATE 至 $END_DATE${NC}"
+elif [[ -n "$START_DATE" ]]; then
+    echo -e "${YELLOW}日期范围: $START_DATE 至 最新可下载${NC}"
+else
+    echo -e "${YELLOW}日期范围: 最早可下载 至 $END_DATE${NC}"
+fi
 echo ""
 
 # 创建工作目录

@@ -305,9 +305,9 @@ ${GREEN}账号配置方式:${NC}
 ${GREEN}选项:${NC}
     --package <name>       包名（必需）
                            例如: dde-dock, dde-control-center, dde-launcher
-    --start-date <date>   开始日期（格式: YYYY-MM-DD）
+    --start-date <date>   开始日期（格式: YYYY-MM-DD；默认不限制）
                            例如: 2026-04-05
-    --end-date <date>     结束日期（格式: YYYY-MM-DD）
+    --end-date <date>     结束日期（格式: YYYY-MM-DD；默认不限制）
                            例如: 2026-04-08
     --sys-version <ver>   系统版本范围（默认: 1070-1075）
                            例如: 1070, 1070-1075
@@ -376,12 +376,6 @@ parse_args() {
         exit 1
     fi
 
-    # 默认日期：如果未指定，使用最近7天
-    if [[ -z "$START_DATE" ]]; then
-        START_DATE=$(date -d '7 days ago' +%Y-%m-%d)
-        END_DATE=$(date +%Y-%m-%d)
-        echo -e "${YELLOW}使用默认日期范围: $START_DATE 至 $END_DATE${NC}"
-    fi
 }
 
 # 打印进度
@@ -438,11 +432,12 @@ download_data() {
     echo "" >&2
 
     cd "$WORKSPACE/1.数据下载"
-    bash "$download_script" \
-        --start-date "$START_DATE" \
-        --end-date "$END_DATE" \
-        --sys-version "$SYS_VERSION" \
-        "$PACKAGE" "$ARCH" crash >&2
+    local cmd=(bash "$download_script" --sys-version "$SYS_VERSION")
+    [[ -n "$START_DATE" ]] && cmd+=(--start-date "$START_DATE")
+    [[ -n "$END_DATE" ]] && cmd+=(--end-date "$END_DATE")
+    cmd+=("$PACKAGE" "$ARCH" crash)
+    echo -e "${YELLOW}执行: ${cmd[*]}${NC}" >&2
+    "${cmd[@]}" >&2
 
     # 查找下载的文件
     local csv_file=$(find "$WORKSPACE/1.数据下载" -name "${PACKAGE}_X86_crash_*.csv" -type f | sort | tail -1)
@@ -607,6 +602,11 @@ download_packages_for_version() {
     # 清理版本号（用于下载）
     local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
 
+    if ! can_install_deb_packages; then
+        echo -e "${YELLOW}⚠️ 未配置 sudo 密码且当前用户无免密 sudo，跳过 deb/dbgsym 下载${NC}"
+        return 0
+    fi
+
     # 下载该版本的包和调试符号（使用位置参数格式）
     echo -e "${YELLOW}下载 $package ${clean_version} ...${NC}"
 
@@ -615,8 +615,10 @@ download_packages_for_version() {
         -d "$dl_dir" \
         "$package" "$clean_version" 2>&1 || true
 
-    # 使用 find 检查文件是否存在（避免 ls 在多文件时返回1的问题）
-    if [[ -d "$dl_dir" ]] && [[ -n "$(find "$dl_dir" -maxdepth 1 -name "*_${version}_*.deb" -type f 2>/dev/null)" ]]; then
+    # 使用 find 检查文件是否存在，允许 Debian 构建后缀：
+    #   pkg_1.2.3_amd64.deb / pkg_1.2.3-1_amd64.deb
+    #   pkg_1.2.3+build_amd64.deb / pkg_1.2.3.1-1_amd64.deb
+    if [[ -d "$dl_dir" ]] && [[ -n "$(find_deb_files_for_version "$dl_dir" "$package" "$clean_version")" ]]; then
         echo -e "${GREEN}✅ 包下载完成${NC}"
         return 0
     else
@@ -624,6 +626,31 @@ download_packages_for_version() {
         echo "$package $clean_version (精确版本不匹配)" >> "$skipped_versions_file"
         return 1
     fi
+}
+
+can_install_deb_packages() {
+    if [[ -n "$SUDO_PASSWORD" && "$SUDO_PASSWORD" != "null" && "$SUDO_PASSWORD" != "在此处输入"* ]]; then
+        return 0
+    fi
+
+    sudo -n true 2>/dev/null
+}
+
+find_deb_files_for_version() {
+    local dl_dir="$1"
+    local package="$2"
+    local version="$3"
+
+    find "$dl_dir" -maxdepth 1 -type f \( \
+        -name "${package}_${version}_*.deb" -o \
+        -name "${package}_${version}-*.deb" -o \
+        -name "${package}_${version}+*.deb" -o \
+        -name "${package}_${version}.*.deb" -o \
+        -name "${package}-dbgsym_${version}_*.deb" -o \
+        -name "${package}-dbgsym_${version}-*.deb" -o \
+        -name "${package}-dbgsym_${version}+*.deb" -o \
+        -name "${package}-dbgsym_${version}.*.deb" \
+    \) 2>/dev/null | sort
 }
 
 # 步骤5: 安装包并分析指定版本的崩溃
@@ -650,16 +677,26 @@ analyze_crashes_for_version() {
         echo -e "${YELLOW}⚠️ 该版本 deb 包不存在，跳过安装，直接使用 AI 分析${NC}"
     else
         # 安装该版本的 deb 包（包括调试符号包 dbgsym）
-        # 匹配模式: *_{version}_*.deb (如 dde-session-ui_5.8.11-1_amd64.deb, dde-session-ui-dbgsym_5.8.11-1_amd64.deb)
         # 使用 find 避免 ls 在多文件时返回1的问题
         if [[ -d "$dl_dir" ]]; then
-            local deb_files=$(find "$dl_dir" -maxdepth 1 -name "*_${version}_*.deb" -type f 2>/dev/null || true)
+            local deb_files=$(find_deb_files_for_version "$dl_dir" "$package" "$clean_version" || true)
             if [[ -n "$deb_files" ]]; then
-                echo -e "${YELLOW}安装 deb 包:${NC}"
-                for deb_file in $deb_files; do
-                    if [[ -f "$deb_file" ]]; then
-                        echo -e "  安装: $(basename "$deb_file")${NC}"
-                        if [[ -n "$SUDO_PASSWORD" ]]; then
+                local can_install=false
+                local use_expect=false
+
+                if [[ -n "$SUDO_PASSWORD" && "$SUDO_PASSWORD" != "null" && "$SUDO_PASSWORD" != "在此处输入"* ]]; then
+                    can_install=true
+                    use_expect=true
+                elif can_install_deb_packages; then
+                    can_install=true
+                fi
+
+                if [[ "$can_install" == "true" ]]; then
+                    echo -e "${YELLOW}安装 deb 包:${NC}"
+                    for deb_file in $deb_files; do
+                        if [[ -f "$deb_file" ]]; then
+                            echo -e "  安装: $(basename "$deb_file")${NC}"
+                            if [[ "$use_expect" == "true" ]]; then
                             # 使用 expect 自动输入密码，避免 sudo requiretty 问题
                             # 匹配中英文密码提示: "password" 或 "请输入密码"
                             expect -c "
@@ -676,11 +713,14 @@ expect {
     }
 }
 " 2>&1 || true
-                        else
-                            sudo dpkg -i "$deb_file" 2>&1 || true
+                            else
+                                sudo -n dpkg -i "$deb_file" 2>&1 || true
+                            fi
                         fi
-                    fi
-                done
+                    done
+                else
+                    echo -e "${YELLOW}⚠️ 未配置 sudo 密码且当前用户无免密 sudo，跳过 deb 安装${NC}"
+                fi
             fi
         fi
     fi
@@ -783,11 +823,22 @@ analyze_crashes() {
     # 生成分析报告
     local report_file="$WORKSPACE/5.崩溃分析/${PACKAGE}_crash_analysis_report.md"
 
+    local date_range_label
+    if [[ -z "$START_DATE" && -z "$END_DATE" ]]; then
+        date_range_label="全部可下载数据（不按日期过滤）"
+    elif [[ -n "$START_DATE" && -n "$END_DATE" ]]; then
+        date_range_label="$START_DATE 至 $END_DATE"
+    elif [[ -n "$START_DATE" ]]; then
+        date_range_label="$START_DATE 至 最新可下载"
+    else
+        date_range_label="最早可下载 至 $END_DATE"
+    fi
+
     cat > "$report_file" << EOF
 # $PACKAGE 崩溃分析报告
 
 **分析时间**: $(date '+%Y-%m-%d %H:%M:%S')
-**数据范围**: $START_DATE 至 $END_DATE
+**数据范围**: $date_range_label
 **包名**: $PACKAGE
 
 ## 目录结构

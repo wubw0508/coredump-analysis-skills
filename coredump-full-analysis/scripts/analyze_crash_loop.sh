@@ -49,9 +49,9 @@ ${GREEN}用法:${NC}
 ${GREEN}选项:${NC}
     --package <name>       包名（必需）
                            例如: dde-session-ui
-    --start-date <date>   开始日期（格式: YYYY-MM-DD）
+    --start-date <date>   开始日期（格式: YYYY-MM-DD；默认不限制）
                            例如: 2026-04-01
-    --end-date <date>     结束日期（格式: YYYY-MM-DD）
+    --end-date <date>     结束日期（格式: YYYY-MM-DD；默认不限制）
                            例如: 2026-04-08
     --sys-version <ver>   系统版本范围（默认: 1070-1075）
                            例如: 1070, 1070-1075
@@ -63,7 +63,7 @@ ${GREEN}选项:${NC}
     --help, -h            显示此帮助信息
 
 ${GREEN}示例:${NC}
-    # 分析最近7天的dde-session-ui崩溃
+    # 分析所有能下载的dde-session-ui崩溃
     $0 --package dde-session-ui --workspace /path/to/workspace
 
     # 从指定版本继续分析
@@ -136,12 +136,6 @@ parse_args() {
         exit 1
     fi
 
-    # 默认日期：如果未指定，使用最近7天
-    if [[ -z "$START_DATE" ]]; then
-        START_DATE=$(date -d '7 days ago' +%Y-%m-%d)
-        END_DATE=$(date +%Y-%m-%d)
-        echo -e "${YELLOW}使用默认日期范围: $START_DATE 至 $END_DATE${NC}"
-    fi
 }
 
 # 打印进度
@@ -444,11 +438,12 @@ phase3_generate_report() {
         chmod +x "$WORKSPACE/generate_final_report.py"
 
         cd "$WORKSPACE"
-        python3 generate_final_report.py \
-            --workspace "$WORKSPACE" \
-            --package "$PACKAGE" \
-            --start-date "$START_DATE" \
-            --end-date "$END_DATE"
+        local cmd=(python3 generate_final_report.py
+            --workspace "$WORKSPACE"
+            --package "$PACKAGE")
+        [[ -n "$START_DATE" ]] && cmd+=(--start-date "$START_DATE")
+        [[ -n "$END_DATE" ]] && cmd+=(--end-date "$END_DATE")
+        "${cmd[@]}"
 
         echo -e "${GREEN}    ✅ 最终报告已生成: $WORKSPACE/final_report/final_conclusion.md${NC}"
     else
@@ -472,7 +467,15 @@ main() {
     echo -e "${CYAN}配置信息:${NC}"
     echo -e "  包名: ${PACKAGE}"
     echo -e "  工作目录: ${WORKSPACE}"
-    echo -e "  日期范围: ${START_DATE} 至 ${END_DATE}"
+    if [[ -z "$START_DATE" && -z "$END_DATE" ]]; then
+        echo -e "  日期范围: 全部可下载数据（不按日期过滤）"
+    elif [[ -n "$START_DATE" && -n "$END_DATE" ]]; then
+        echo -e "  日期范围: ${START_DATE} 至 ${END_DATE}"
+    elif [[ -n "$START_DATE" ]]; then
+        echo -e "  日期范围: ${START_DATE} 至 最新可下载"
+    else
+        echo -e "  日期范围: 最早可下载 至 ${END_DATE}"
+    fi
     echo -e "  最小崩溃次数: ${MIN_CRASH_COUNT}"
     echo -e "  自动提交Gerrit: ${AUTO_SUBMIT_GERRIT}"
     echo ""

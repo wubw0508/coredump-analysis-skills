@@ -41,8 +41,8 @@ ${GREEN}必需参数:${NC}
     --package <name>       要分析的包名
 
 ${GREEN}可选参数:${NC}
-    --start-date <date>   开始日期 (默认: 7天前)
-    --end-date <date>     结束日期 (默认: 今天)
+    --start-date <date>   开始日期 (默认: 不限制，下载所有可取数据)
+    --end-date <date>     结束日期 (默认: 不限制，下载所有可取数据)
     --sys-version <ver>   系统版本范围 (默认: 1070-1075)
     --arch <arch>         架构 (默认: x86)
     --workspace <dir>     工作目录 (默认: ~/coredump-workspace-YYYYMMDD_HHMMSS)
@@ -107,10 +107,14 @@ if [[ -z "$PACKAGE" ]]; then
     exit 1
 fi
 
-# 计算默认日期
-if [[ -z "$START_DATE" ]]; then
-    START_DATE=$(date -d '7 days ago' +%Y-%m-%d)
-    END_DATE=$(date +%Y-%m-%d)
+if [[ -z "$START_DATE" && -z "$END_DATE" ]]; then
+    DATE_RANGE_LABEL="全部可下载数据（不按日期过滤）"
+elif [[ -n "$START_DATE" && -n "$END_DATE" ]]; then
+    DATE_RANGE_LABEL="$START_DATE 至 $END_DATE"
+elif [[ -n "$START_DATE" ]]; then
+    DATE_RANGE_LABEL="$START_DATE 至 最新可下载"
+else
+    DATE_RANGE_LABEL="最早可下载 至 $END_DATE"
 fi
 
 echo -e "${BLUE}=============================================================================${NC}"
@@ -120,8 +124,7 @@ echo ""
 echo -e "${GREEN}分析参数:${NC}"
 echo "  包名: $PACKAGE"
 echo "  架构: $ARCH"
-echo "  开始日期: $START_DATE"
-echo "  结束日期: $END_DATE"
+echo "  日期范围: $DATE_RANGE_LABEL"
 echo "  系统版本: $SYS_VERSION"
 echo "  工作目录: $WORKSPACE"
 echo "  进度报告间隔: ${PROGRESS_INTERVAL}秒"
@@ -191,18 +194,18 @@ is_running() {
 # 启动主分析进程
 echo -e "${YELLOW}启动崩溃分析...${NC}"
 
-# 构建命令
-CMD="cd $HOME/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts && \
-bash analyze_crash_complete.sh \
-    --package $PACKAGE \
-    --arch $ARCH \
-    --start-date $START_DATE \
-    --end-date $END_DATE \
-    --sys-version $SYS_VERSION \
-    --workspace \"$WORKSPACE\" 2>&1"
-
 # 启动后台进程
-eval "$CMD" &
+(
+    cd "$HOME/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts"
+    cmd=(bash analyze_crash_complete.sh
+        --package "$PACKAGE"
+        --arch "$ARCH"
+        --sys-version "$SYS_VERSION"
+        --workspace "$WORKSPACE")
+    [[ -n "$START_DATE" ]] && cmd+=(--start-date "$START_DATE")
+    [[ -n "$END_DATE" ]] && cmd+=(--end-date "$END_DATE")
+    "${cmd[@]}" 2>&1
+) &
 MAIN_PID=$!
 
 echo -e "${GREEN}分析进程已启动 (PID: $MAIN_PID)${NC}"

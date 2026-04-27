@@ -10,6 +10,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 # 生成带时间戳的workspace路径
@@ -47,9 +48,9 @@ ${GREEN}必需参数:${NC}
                            不指定: 自动从 packages.txt 读取24个默认项目
 
 ${GREEN}可选参数:${NC}
-    --start-date <date>   开始日期 (默认: 7天前)
+    --start-date <date>   开始日期 (默认: 不限制，下载所有可取数据)
                            例如: 2026-03-14
-    --end-date <date>     结束日期 (默认: 今天)
+    --end-date <date>     结束日期 (默认: 不限制，下载所有可取数据)
                            例如: 2026-04-14
     --sys-version <ver>   系统版本范围 (默认: 1070-1075)
                            例如: 1070, 1070-1075, 1070-1075
@@ -65,7 +66,10 @@ ${GREEN}示例:${NC}
     # 全量分析（读取 packages.txt，分析全部24个默认项目）
     $0
 
-    # 分析单个包最近一个月崩溃 (x86)
+    # 分析单个包所有能下载的崩溃 (x86)
+    $0 --packages dde-session-ui
+
+    # 分析单个包指定日期范围内的崩溃 (x86)
     $0 --packages dde-session-ui --start-date 2026-03-14 --end-date 2026-04-14
 
     # 并行分析多个包
@@ -170,16 +174,19 @@ if [[ -z "$PACKAGES" ]]; then
     fi
 fi
 
-# 计算默认日期
-if [[ -z "$START_DATE" ]]; then
-    START_DATE=$(date -d "1 month ago" +%Y-%m-%d)
-    END_DATE=$(date +%Y-%m-%d)
-    echo -e "${YELLOW}使用默认日期范围: $START_DATE 至 $END_DATE${NC}"
-fi
-
 # 转换为数组（支持逗号分隔）
 IFS=',' read -ra PACKAGE_ARRAY <<< "$PACKAGES"
 PACKAGE_COUNT=${#PACKAGE_ARRAY[@]}
+
+if [[ -z "$START_DATE" && -z "$END_DATE" ]]; then
+    DATE_RANGE_LABEL="全部可下载数据（不按日期过滤）"
+elif [[ -n "$START_DATE" && -n "$END_DATE" ]]; then
+    DATE_RANGE_LABEL="$START_DATE 至 $END_DATE"
+elif [[ -n "$START_DATE" ]]; then
+    DATE_RANGE_LABEL="$START_DATE 至 最新可下载"
+else
+    DATE_RANGE_LABEL="最早可下载 至 $END_DATE"
+fi
 
 echo -e "${BLUE}=============================================================================${NC}"
 echo -e "${BLUE}                    崩溃分析 Agent 启动${NC}"
@@ -189,8 +196,7 @@ echo -e "${GREEN}分析参数:${NC}"
 echo "  包名: $PACKAGES"
 echo "  待分析包数量: $PACKAGE_COUNT"
 echo "  架构: $ARCH"
-echo "  开始日期: $START_DATE"
-echo "  结束日期: $END_DATE"
+echo "  日期范围: $DATE_RANGE_LABEL"
 echo "  系统版本: $SYS_VERSION"
 echo "  工作目录: $WORKSPACE"
 if [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
@@ -225,24 +231,22 @@ export SUDO_PASSWORD=$(jq -r '.system.sudo_password' "$CONFIG_FILE")
 
 # 检查是否有占位符（未配置）
 PLACEHOLDER_PATTERN="在此处输入"
-if [[ "$SHUTTLE_USERNAME" == "$PLACEHOLDER_PATTERN"* ]] || \
-   [[ "$SHUTTLE_PASSWORD" == "$PLACEHOLDER_PATTERN"* ]] || \
-   [[ "$GERRIT_USERNAME" == "$PLACEHOLDER_PATTERN"* ]] || \
-   [[ "$GERRIT_PASSWORD" == "$PLACEHOLDER_PATTERN"* ]]; then
-    echo -e "${RED}错误: 账号配置未完成，仍包含占位符${NC}"
+if [[ -z "$GERRIT_USERNAME" || "$GERRIT_USERNAME" == "null" || "$GERRIT_USERNAME" == "$PLACEHOLDER_PATTERN"* ]]; then
+    echo -e "${RED}错误: Gerrit 用户名未配置${NC}"
     echo ""
-    echo -e "${YELLOW}检测到以下配置未填写:${NC}"
-    [[ "$SHUTTLE_USERNAME" == "$PLACEHOLDER_PATTERN"* ]] && echo "  - shuttle.username: $SHUTTLE_USERNAME"
-    [[ "$SHUTTLE_PASSWORD" == "$PLACEHOLDER_PATTERN"* ]] && echo "  - shuttle.password: $SHUTTLE_PASSWORD"
-    [[ "$GERRIT_USERNAME" == "$PLACEHOLDER_PATTERN"* ]] && echo "  - gerrit.username: $GERRIT_USERNAME"
-    [[ "$GERRIT_PASSWORD" == "$PLACEHOLDER_PATTERN"* ]] && echo "  - gerrit.password: $GERRIT_PASSWORD"
-    echo ""
-    echo -e "${YELLOW}请先完成账号配置，运行以下命令:${NC}"
+    echo -e "${YELLOW}请先配置账号信息，运行以下命令:${NC}"
     echo "    python3 $SETUP_ACCOUNTS_SCRIPT"
-    echo ""
-    echo -e "${BLUE}或者直接编辑配置文件:${NC}"
-    echo "    nano $CONFIG_FILE"
     exit 1
+fi
+
+OPTIONAL_CONFIG_WARNINGS=()
+[[ -z "$SHUTTLE_USERNAME" || "$SHUTTLE_USERNAME" == "null" || "$SHUTTLE_USERNAME" == "$PLACEHOLDER_PATTERN"* ]] && OPTIONAL_CONFIG_WARNINGS+=("shuttle.username")
+[[ -z "$SHUTTLE_PASSWORD" || "$SHUTTLE_PASSWORD" == "null" || "$SHUTTLE_PASSWORD" == "$PLACEHOLDER_PATTERN"* ]] && OPTIONAL_CONFIG_WARNINGS+=("shuttle.password")
+[[ -z "$GERRIT_PASSWORD" || "$GERRIT_PASSWORD" == "null" || "$GERRIT_PASSWORD" == "$PLACEHOLDER_PATTERN"* ]] && OPTIONAL_CONFIG_WARNINGS+=("gerrit.password")
+
+if [[ ${#OPTIONAL_CONFIG_WARNINGS[@]} -gt 0 ]]; then
+    echo -e "${YELLOW}警告: 以下可选账号字段未配置，本次流程将继续使用 SSH/内部包服务:${NC}"
+    printf '  - %s\n' "${OPTIONAL_CONFIG_WARNINGS[@]}"
 fi
 
 # 生成环境配置文件
@@ -305,13 +309,14 @@ launch_package() {
     local pkg="$1"
     local log_file="/tmp/analysis_${pkg}.log"
     cd "$HOME/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts"
-    SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" bash analyze_crash_complete.sh \
-        --package "$pkg" \
-        --arch "$ARCH" \
-        --start-date "$START_DATE" \
-        --end-date "$END_DATE" \
-        --sys-version "$SYS_VERSION" \
-        --workspace "$WORKSPACE" 2>&1
+    local cmd=(bash analyze_crash_complete.sh
+        --package "$pkg"
+        --arch "$ARCH"
+        --sys-version "$SYS_VERSION"
+        --workspace "$WORKSPACE")
+    [[ -n "$START_DATE" ]] && cmd+=(--start-date "$START_DATE")
+    [[ -n "$END_DATE" ]] && cmd+=(--end-date "$END_DATE")
+    SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" "${cmd[@]}" 2>&1
 }
 
 # 并行启动所有包的分析
@@ -412,11 +417,27 @@ elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
 else
     # 前台顺序执行
     PACKAGE_IDX=1
+    OVERALL_EXIT_CODE=0
+    FAILED_PACKAGES=()
     for pkg in "${PACKAGE_ARRAY[@]}"; do
         echo -e "${BLUE}=============================================================================${NC}"
         echo -e "${BLUE}  [$PACKAGE_IDX/$PACKAGE_COUNT] 分析包: $pkg${NC}"
         echo -e "${BLUE}=============================================================================${NC}"
-        launch_package "$pkg"
+        if launch_package "$pkg"; then
+            echo -e "${GREEN}✅ $pkg 分析完成${NC}"
+        else
+            pkg_exit_code=$?
+            OVERALL_EXIT_CODE=$pkg_exit_code
+            FAILED_PACKAGES+=("$pkg")
+            echo -e "${RED}❌ $pkg 分析失败，继续下一个包${NC}"
+        fi
         ((PACKAGE_IDX++)) || true
     done
+
+    if [[ ${#FAILED_PACKAGES[@]} -gt 0 ]]; then
+        echo ""
+        echo -e "${RED}以下包分析失败:${NC}"
+        printf '  - %s\n' "${FAILED_PACKAGES[@]}"
+        exit "$OVERALL_EXIT_CODE"
+    fi
 fi

@@ -52,6 +52,15 @@ class DebDownloader:
         self.downloaded_files = []
         self._task_ids_cache = None
 
+    @staticmethod
+    def _matches_version_prefix(deb_file, package_prefix, version):
+        """Match version prefixes without confusing 1.2.3 with 1.2.30."""
+        prefix = f"{package_prefix}{version}"
+        if not deb_file.startswith(prefix):
+            return False
+        suffix = deb_file[len(prefix):]
+        return bool(suffix) and suffix[0] in "_-+."
+
     def get_all_task_ids(self):
         """获取所有可用的 task_id（带缓存）"""
         if self._task_ids_cache is not None:
@@ -111,8 +120,8 @@ class DebDownloader:
 
                     # 如果没精确匹配，尝试前缀匹配（模糊匹配）
                     if not matched:
-                        if deb_file.startswith(f"{package}_{version}") or \
-                           deb_file.startswith(f"{package}-dbgsym_{version}"):
+                        if self._matches_version_prefix(deb_file, f"{package}_", version) or \
+                           self._matches_version_prefix(deb_file, f"{package}-dbgsym_", version):
                             target_files.append(deb_file)
                 else:
                     # 无版本时匹配所有版本
