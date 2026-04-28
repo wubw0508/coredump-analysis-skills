@@ -34,6 +34,12 @@ def configure_logging(download_dir: str):
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "download.log"
 
+    # Python 3.7 不支持 basicConfig(force=True)，手动清理已有 handler。
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+        handler.close()
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
@@ -41,7 +47,6 @@ def configure_logging(download_dir: str):
             logging.FileHandler(log_file, encoding='utf-8'),
             logging.StreamHandler()
         ],
-        force=True,
     )
 
 

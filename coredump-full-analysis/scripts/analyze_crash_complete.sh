@@ -557,6 +557,24 @@ find_deb_files_for_version() {
     \) 2>/dev/null | sort
 }
 
+split_deb_files_for_install() {
+    local deb_files="$1"
+    local main_files=""
+    local dbgsym_files=""
+    local deb_file=""
+
+    while IFS= read -r deb_file; do
+        [[ -z "$deb_file" ]] && continue
+        if [[ "$deb_file" == *"-dbgsym_"* ]] || [[ "$deb_file" == *"dbgsym"* ]]; then
+            dbgsym_files+="$deb_file"$'\n'
+        else
+            main_files+="$deb_file"$'\n'
+        fi
+    done <<< "$deb_files"
+
+    printf '%s__SPLIT__\n%s' "$main_files" "$dbgsym_files"
+}
+
 # 步骤5: 安装包并分析指定版本的崩溃
 analyze_crashes_for_version() {
     local package="$1"
@@ -588,6 +606,10 @@ analyze_crashes_for_version() {
             if [[ -n "$deb_files" ]]; then
                 local can_install=false
                 local use_expect=false
+                local split_output=""
+                local main_deb_files=""
+                local dbgsym_deb_files=""
+                local deb_file=""
 
                 if [[ -n "$SUDO_PASSWORD" && "$SUDO_PASSWORD" != "null" && "$SUDO_PASSWORD" != "在此处输入"* ]]; then
                     can_install=true
@@ -598,13 +620,18 @@ analyze_crashes_for_version() {
 
                 if [[ "$can_install" == "true" ]]; then
                     echo -e "${YELLOW}安装 deb 包:${NC}"
-                    for deb_file in $deb_files; do
+                    split_output=$(split_deb_files_for_install "$deb_files")
+                    main_deb_files="${split_output%%__SPLIT__*}"
+                    dbgsym_deb_files="${split_output#*__SPLIT__}"
+
+                    while IFS= read -r deb_file; do
+                        [[ -z "$deb_file" ]] && continue
                         if [[ -f "$deb_file" ]]; then
                             echo -e "  安装: $(basename "$deb_file")${NC}"
                             if [[ "$use_expect" == "true" ]]; then
-                            # 使用 expect 自动输入密码，避免 sudo requiretty 问题
-                            # 匹配中英文密码提示: "password" 或 "请输入密码"
-                            expect -c "
+                                # 使用 expect 自动输入密码，避免 sudo requiretty 问题
+                                # 匹配中英文密码提示: "password" 或 "请输入密码"
+                                expect -c "
 set deb_file \"$deb_file\"
 set sudo_pass \"$SUDO_PASSWORD\"
 spawn sudo dpkg -i \$deb_file
@@ -622,7 +649,32 @@ expect {
                                 sudo -n dpkg -i "$deb_file" 2>&1 || true
                             fi
                         fi
-                    done
+                    done <<< "$main_deb_files"
+
+                    while IFS= read -r deb_file; do
+                        [[ -z "$deb_file" ]] && continue
+                        if [[ -f "$deb_file" ]]; then
+                            echo -e "  安装: $(basename "$deb_file")${NC}"
+                            if [[ "$use_expect" == "true" ]]; then
+                                expect -c "
+set deb_file \"$deb_file\"
+set sudo_pass \"$SUDO_PASSWORD\"
+spawn sudo dpkg -i \$deb_file
+expect {
+    -re \"(password|请输入密码)\" {
+        send \"\$sudo_pass\r\"
+        expect eof
+    }
+    eof {
+        exit 0
+    }
+}
+" 2>&1 || true
+                            else
+                                sudo -n dpkg -i "$deb_file" 2>&1 || true
+                            fi
+                        fi
+                    done <<< "$dbgsym_deb_files"
                 else
                     echo -e "${YELLOW}⚠️ 未配置 sudo 密码且当前用户无免密 sudo，跳过 deb 安装${NC}"
                 fi
