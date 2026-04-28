@@ -15,7 +15,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # 参数
-WORKSPACE="${1:-$(pwd)/workspace}"
+WORKSPACE="${1:-${COREDUMP_WORKSPACE:-$HOME/coredump-workspace-$(date +%Y%m%d-%H%M%S)}}"
 PACKAGE="${2:-dde-session-ui}"
 
 # 目录
@@ -33,7 +33,7 @@ ${GREEN}用法:${NC}
     $0 [workspace] [package]
 
 ${GREEN}参数:${NC}
-    workspace   工作目录（默认: ./workspace）
+    workspace   工作目录（默认: \$HOME/coredump-workspace-YYYYMMDD-HHMMSS）
     package     包名（默认: dde-session-ui）
 
 ${GREEN}示例:${NC}

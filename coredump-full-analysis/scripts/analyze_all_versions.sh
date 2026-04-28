@@ -27,6 +27,7 @@ FILTERED_CSV="$WORKSPACE/2.数据筛选/filtered_dde-launcher_crash_data.csv"
 STATS_JSON="$WORKSPACE/2.数据筛选/dde-launcher_crash_statistics.json"
 REPORT_FILE="$WORKSPACE/5.崩溃分析/dde-launcher_crash_analysis_report.md"
 PROGRESS_FILE="$WORKSPACE/5.崩溃分析/.analysis_progress.json"
+PATH_DIR="$WORKSPACE/path"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/load_accounts.sh"
 load_accounts_or_die system
@@ -349,7 +350,8 @@ for c in app[:10]:
 }
 
 # 收集结果
-RESULTS_FILE="/tmp/analyze_results_$$.txt"
+mkdir -p "$PATH_DIR"
+RESULTS_FILE="$PATH_DIR/analyze_results_$$.txt"
 > "$RESULTS_FILE"
 
 # 遍历版本

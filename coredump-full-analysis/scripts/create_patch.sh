@@ -240,12 +240,26 @@ EOF
 #
 # Gerrit提交信息建议:
 # -------------------
-# fix: 修复 $package 中的 $fix_type 导致的崩溃 (信号: $crash_signal)
+# [coredump-analysis] fix: 修复 $crash_symbol 导致的崩溃
 #
-# 问题ID: $(echo "$crash" | jq -r '.id' | head -c 16)
-# 崩溃次数: $crash_count
+# 崩溃信息:
+# - 包名: $package
+# - 崩溃版本: $version
+# - 架构: <arch>
+# - 系统版本: $(echo "$crash" | jq -r '.sys_v_number // "unknown"')
+# - Crash ID: $(echo "$crash" | jq -r '.id')
+# - Crash Count: $crash_count
+# - Signal: $crash_signal
+# - App Layer: $crash_symbol
+# - 修复详细堆栈:
+# $(echo "$crash" | jq -r '.stack_info // "N/A"' | head -n 8)
 #
-# 修复方式: $fix_type
+# 本次修复说明:
+# - Root Cause: $fix_reason
+# - Fix: $fix_type
+#
+# Log: 基于产品说明补充本次修复内容
+# Influence: 影响哪些功能点
 #
 EOF
 

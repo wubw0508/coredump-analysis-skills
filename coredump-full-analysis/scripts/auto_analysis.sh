@@ -13,13 +13,14 @@ NC='\033[0m'
 
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
 
-DEFAULT_WORKSPACE="./coredump_workspace"
+DEFAULT_WORKSPACE="$HOME/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
 DEFAULT_PACKAGE=""
 DEFAULT_START_DATE=""
 DEFAULT_END_DATE=""
 DEFAULT_SYS_VERSION="1070-1075"
 DEFAULT_TARGET_BRANCH="develop/eagle"
 DEFAULT_MAX_VERSIONS=3
+PATH_DIR=""
 
 show_help() {
     cat << EOF
@@ -34,7 +35,7 @@ ${BLUE}=========================================================================
   --start-date <date>   开始日期 (YYYY-MM-DD；默认不限制)
   --end-date <date>     结束日期 (YYYY-MM-DD；默认不限制)
   --sys-version <ver>   系统版本 (默认: 1070-1075)
-  --workspace <dir>      工作目录 (默认: ./coredump_workspace)
+  --workspace <dir>      工作目录 (默认: \$HOME/coredump-workspace-YYYYMMDD-HHMMSS)
   --target-branch <br>  目标分支 (默认: develop/eagle)
   --max-versions <n>     处理Top N个版本 (默认: 3)
   --help, -h             显示此帮助信息
@@ -139,6 +140,8 @@ check_dependencies() {
     mkdir -p "$WORKSPACE/5.符号化分析"
     mkdir -p "$WORKSPACE/6.修复与建议"
     mkdir -p "$WORKSPACE/6.总结报告"
+    PATH_DIR="$WORKSPACE/path"
+    mkdir -p "$PATH_DIR"
 
     echo -e "${GREEN}✓ 依赖检查完成${NC}"
     echo "  工作目录: $WORKSPACE"
@@ -192,7 +195,7 @@ step1_download_data() {
         echo "  行数: ${line_count:-未知}"
 
         # 将CSV路径写入临时文件供后续步骤读取
-        echo "$csv_file" > /tmp/step1_csv_file.txt
+        echo "$csv_file" > "$PATH_DIR/step1_csv_file.txt"
         return 0
     else
         echo -e "${RED}数据下载失败${NC}"
@@ -233,7 +236,7 @@ PY_SCRIPT_END
     chmod +x "${output_dir}/filter_crash_data.py"
 
     # 在脚本所在目录运行 filter 脚本
-    (cd "$output_dir" && python3 "${output_dir}/filter_crash_data.py" "$PACKAGE") > /tmp/step2_output.txt 2>&1
+    (cd "$output_dir" && python3 "${output_dir}/filter_crash_data.py" "$PACKAGE") > "$PATH_DIR/step2_output.txt" 2>&1
 
     if [[ $? -eq 0 ]]; then
         local filtered_csv="$WORKSPACE/2.数据筛选/filtered_${PACKAGE}_crash_data.csv"
@@ -250,11 +253,11 @@ PY_SCRIPT_END
         fi
 
         # 将过滤后的CSV路径写入临时文件
-        echo "$filtered_csv" > /tmp/step2_filtered_csv.txt
+        echo "$filtered_csv" > "$PATH_DIR/step2_filtered_csv.txt"
         return 0
     else
         echo -e "${RED}数据筛选失败${NC}"
-        cat /tmp/step2_output.txt
+        cat "$PATH_DIR/step2_output.txt"
         return 1
     fi
 }
@@ -421,7 +424,7 @@ with open('generate_tasks.py', 'w') as f:
 " 2>/dev/null | true
 
     echo "生成下载任务..."
-    if python3 ./generate_tasks.py > /tmp/gen_tasks.log 2>&1; then
+    if python3 ./generate_tasks.py > "$PATH_DIR/gen_tasks.log" 2>&1; then
         local tasks_file="./download_tasks.json"
         if [[ -f "$tasks_file" ]]; then
             echo -e "${GREEN}✓ 下载任务已生成${NC}"
@@ -430,13 +433,13 @@ with open('generate_tasks.py', 'w') as f:
             read -p "是否下载deb包？ (y/n): " download_choice
             if [[ "$download_choice" =~ ^[Yy]$ ]]; then
                 echo "开始下载包..."
-                python3 ./scan_and_download.py --batch download_tasks.json 2>&1 | tee /tmp/download.log
+                python3 ./scan_and_download.py --batch download_tasks.json 2>&1 | tee "$PATH_DIR/download.log"
                 echo -e "${GREEN}✓ 包下载完成${NC}"
             fi
         fi
     else
         echo -e "${YELLOW}任务生成失败${NC}"
-        cat /tmp/gen_tasks.log
+        cat "$PATH_DIR/gen_tasks.log"
         return 1
     fi
 
@@ -762,7 +765,7 @@ REPORT_HEADER
         echo "| 排名 | 版本 | 崩溃次数 | 信号 | 应用库 | 应用符号 |" >> "$report_file"
         echo "|------|------|---------|------|--------|----------|" >> "$report_file"
 
-        cat > "/tmp/gen_table.py" << 'PY_TABLE_END'
+        cat > "$PATH_DIR/gen_table.py" << 'PY_TABLE_END'
 import csv
 import sys
 
@@ -779,7 +782,7 @@ with open(csv_file, 'r', encoding='utf-8') as f:
             rf.write(f"| {i} | {row['Version']} | {row['Count']} | {row['Sig']} | {row['App_Layer_Library'] or 'N/A'} | {symbol} |\n")
 PY_TABLE_END
 
-        python3 "/tmp/gen_table.py" "$filtered_csv" "$report_file"
+        python3 "$PATH_DIR/gen_table.py" "$filtered_csv" "$report_file"
     fi
 
     cat >> "$report_file" << REPORT_FOOTER
@@ -833,12 +836,12 @@ main() {
     # 步骤1: 下载数据
     step1_download_data
     [[ $? -ne 0 ]] && exit 1
-    local csv_file=$(cat /tmp/step1_csv_file.txt)
+    local csv_file=$(cat "$PATH_DIR/step1_csv_file.txt")
 
     # 步骤2: 筛选数据
     step2_filter_data "$csv_file"
     [[ $? -ne 0 ]] && exit 1
-    local filtered_csv=$(cat /tmp/step2_filtered_csv.txt)
+    local filtered_csv=$(cat "$PATH_DIR/step2_filtered_csv.txt")
 
     # 步骤3: 版本切换
     local source_dir=$(step3_switch_versions "$filtered_csv")

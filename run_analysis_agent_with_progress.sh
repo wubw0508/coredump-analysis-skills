@@ -15,7 +15,7 @@ NC='\033[0m'
 
 # 生成带时间戳的workspace路径
 generate_workspace_with_timestamp() {
-    echo "$HOME/coredump-workspace-$(date +%Y%m%d_%H%M%S)"
+    echo "$HOME/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
 }
 
 # 默认值
@@ -45,7 +45,7 @@ ${GREEN}可选参数:${NC}
     --end-date <date>     结束日期 (默认: 不限制，下载所有可取数据)
     --sys-version <ver>   系统版本范围 (默认: 1070-1075)
     --arch <arch>         架构 (默认: x86)
-    --workspace <dir>     工作目录 (默认: ~/coredump-workspace-YYYYMMDD_HHMMSS)
+    --workspace <dir>     工作目录 (默认: ~/coredump-workspace-YYYYMMDD-HHMMSS)
     --interval <seconds>  进度报告间隔 (默认: 180秒)
     --help, -h           显示帮助
 

@@ -16,7 +16,7 @@ NC='\033[0m'
 # 生成带时间戳的workspace路径
 generate_workspace_with_timestamp() {
     local root_dir="${1:-$HOME}"
-    echo "$root_dir/coredump-workspace-$(date +%Y%m%d_%H%M%S)"
+    echo "$root_dir/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
 }
 
 # 默认值
@@ -32,8 +32,12 @@ ARCH="x86"
 WORKSPACE=""
 RUN_BACKGROUND=false
 PROGRESS_INTERVAL=0  # 0表示禁用进度监控，非0表示启用(秒)
+AUTO_FIX_SUBMIT=false
+TARGET_BRANCH="origin/develop/eagle"
+REVIEWERS=()
 SUMMARY_DIR_NAME="6.总结报告"
 PACKAGE_STATUS_FILE=""
+LOG_DIR=""
 
 # 显示帮助
 show_help() {
@@ -60,10 +64,13 @@ ${GREEN}可选参数:${NC}
                            例如: 1070, 1070-1075, 1070-1075
     --arch <arch>        架构 (默认: x86)
                            例如: x86, x86_64, arm64
-    --workspace <dir>      工作目录 (默认: ~/coredump-workspace-YYYYMMDD_HHMMSS)
+    --workspace <dir>      工作目录 (默认: ~/coredump-workspace-YYYYMMDD-HHMMSS)
     --background          后台运行
     --progress [秒]       启用进度监控 (默认: 180秒)
     --interval <秒>       进度报告间隔 (默认: 180秒)
+    --auto-fix-submit     分析后自动检查 target branch 是否已修复，并对已注册 fixer 的模式尝试自动提交
+    --target-branch <br>  自动修复提交目标分支 (默认: origin/develop/eagle)
+    --reviewer <email>    自动提交时附加 reviewer，可多次指定
     --help, -h           显示帮助
 
 ${GREEN}示例:${NC}
@@ -93,6 +100,9 @@ ${GREEN}示例:${NC}
 
     # 带进度监控 (每2分钟报告一次)
     $0 --packages dde-session-ui --progress 120
+
+    # 分析后自动检查已修复并提交可自动修复的问题
+    $0 --packages dde-launcher --auto-fix-submit --target-branch origin/develop/eagle
 
 ${GREEN}兼容说明:${NC}
     仍兼容旧参数 --package，但新文档统一使用 --packages
@@ -149,6 +159,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --interval)
             PROGRESS_INTERVAL="$2"
+            shift 2
+            ;;
+        --auto-fix-submit)
+            AUTO_FIX_SUBMIT=true
+            shift
+            ;;
+        --target-branch)
+            TARGET_BRANCH="$2"
+            shift 2
+            ;;
+        --reviewer)
+            REVIEWERS+=("$2")
             shift 2
             ;;
         --help|-h)
@@ -209,6 +231,8 @@ echo "  工作目录: $WORKSPACE"
 if [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
     echo "  进度监控: ${PROGRESS_INTERVAL}秒"
 fi
+echo "  自动修复提交: $AUTO_FIX_SUBMIT"
+echo "  自动修复目标分支: $TARGET_BRANCH"
 echo ""
 
 # 从 accounts.json 读取凭据
@@ -228,6 +252,9 @@ if [[ -z "$WORKSPACE" ]]; then
     fi
     WORKSPACE=$(generate_workspace_with_timestamp "$local_workspace_root")
 fi
+
+LOG_DIR="$WORKSPACE/$SUMMARY_DIR_NAME/logs"
+mkdir -p "$LOG_DIR"
 
 echo -e "${YELLOW}已从 accounts.json 加载账号配置${NC}"
 
@@ -367,6 +394,12 @@ launch_package() {
         --workspace "$WORKSPACE")
     [[ -n "$START_DATE" ]] && cmd+=(--start-date "$START_DATE")
     [[ -n "$END_DATE" ]] && cmd+=(--end-date "$END_DATE")
+    [[ "$AUTO_FIX_SUBMIT" == "true" ]] && cmd+=(--auto-fix-submit)
+    [[ -n "$TARGET_BRANCH" ]] && cmd+=(--target-branch "$TARGET_BRANCH")
+    local reviewer
+    for reviewer in "${REVIEWERS[@]}"; do
+        cmd+=(--reviewer "$reviewer")
+    done
     if SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" "${cmd[@]}" 2>&1; then
         log_package_status "$pkg" "completed" "0" "analysis completed"
         return 0
@@ -384,7 +417,7 @@ if [[ "$RUN_BACKGROUND" == "true" ]]; then
     echo "并行启动 $PACKAGE_COUNT 个包的分析..."
     declare -a PIDS
     for pkg in "${PACKAGE_ARRAY[@]}"; do
-        launch_package "$pkg" > "/tmp/analysis_${pkg}.log" 2>&1 &
+        launch_package "$pkg" > "$LOG_DIR/analysis_${pkg}.log" 2>&1 &
         pid=$!
         PIDS+=($pid)
         echo -e "${GREEN}✅ $pkg 已启动 (PID: $pid)${NC}"
@@ -395,16 +428,16 @@ if [[ "$RUN_BACKGROUND" == "true" ]]; then
         for pid in "${PIDS[@]}"; do
             wait "$pid" || overall_exit=$?
         done
-        generate_workspace_reports "" >> "/tmp/analysis_workspace_summary.log" 2>&1
+        generate_workspace_reports "" >> "$LOG_DIR/analysis_workspace_summary.log" 2>&1
         exit "$overall_exit"
     ) &
     summary_pid=$!
     echo ""
     echo "使用 'jobs' 查看后台任务，或查看各包日志:"
     for pkg in "${PACKAGE_ARRAY[@]}"; do
-        echo "  tail -f /tmp/analysis_${pkg}.log  # $pkg"
+        echo "  tail -f $LOG_DIR/analysis_${pkg}.log  # $pkg"
     done
-    echo "  tail -f /tmp/analysis_workspace_summary.log  # workspace 汇总"
+    echo "  tail -f $LOG_DIR/analysis_workspace_summary.log  # workspace 汇总"
     echo "  后台汇总进程 PID: $summary_pid"
 
 elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
@@ -416,7 +449,7 @@ elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
 
     declare -a PIDS
     for pkg in "${PACKAGE_ARRAY[@]}"; do
-        launch_package "$pkg" > "/tmp/analysis_${pkg}.log" 2>&1 &
+        launch_package "$pkg" > "$LOG_DIR/analysis_${pkg}.log" 2>&1 &
         pid=$!
         PIDS+=($pid)
         echo -e "${GREEN}🚀 $pkg 已启动 (PID: $pid)${NC}"

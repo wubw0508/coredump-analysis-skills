@@ -25,16 +25,24 @@ DEFAULT_DOWNLOAD_DIR = "./downloads"
 MAX_RETRIES = 3
 TIMEOUT = 60
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler('download.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
+
+
+def configure_logging(download_dir: str):
+    """将日志写入 workspace 包管理目录，避免落在 skills 仓库中。"""
+    log_dir = Path(download_dir).resolve().parent
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "download.log"
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler()
+        ],
+        force=True,
+    )
 
 
 class DebDownloader:
@@ -347,6 +355,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    configure_logging(args.download_dir)
 
     # 创建下载器
     downloader = DebDownloader(

@@ -184,19 +184,18 @@ style F fill:#f96,fill-opacity:0.3
 
 ## 八、Git提交格式
 
-```
-fix(<package>): 修复 <crash_description>
+```text
+fix/feat/chore: 提交信息说明
 
-Crash ID: <crash_id>
-Crash Count: <count>
-Signal: <signal> (<description>)
-Package Version: <version>
-Architecture: <arch>
-System Version: <sys_version>
-App Layer: <app_layer_symbol>
-Crash Stack:
+崩溃信息:
+- 崩溃版本: <version>
+- 架构: <arch>
+- 修复详细堆栈:
 <full_stack_trace>
 
-Root Cause: <root_cause>
-Fix: <fix_description>
+本次修复说明:
+<fix_description>
+
+Log: 基于产品说明本次修复内容
+Influence: 影响哪些功能点
 ```

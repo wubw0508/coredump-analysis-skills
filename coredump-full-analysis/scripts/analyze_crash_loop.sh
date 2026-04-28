@@ -27,7 +27,7 @@ PACKAGE="${PACKAGE:-}"
 START_DATE="${START_DATE:-}"
 END_DATE="${END_DATE:-}"
 SYS_VERSION="${SYS_VERSION:-1070-1075}"
-WORKSPACE="${WORKSPACE:-$(pwd)/workspace}"
+WORKSPACE="${WORKSPACE:-}"
 MIN_CRASH_COUNT="${MIN_CRASH_COUNT:-5}"
 AUTO_SUBMIT_GERRIT="${AUTO_SUBMIT_GERRIT:-false}"
 CONTINUE_FROM="${CONTINUE_FROM:-}"
@@ -179,6 +179,11 @@ load_required_accounts() {
 
     source "$LOAD_ACCOUNTS_SCRIPT"
     load_accounts_or_die metabase gerrit shuttle system
+    if [[ -z "$WORKSPACE" ]] || [[ "$WORKSPACE" == "./workspace" ]]; then
+        local workspace_root="${ACCOUNTS_WORKSPACE_ROOT:-$HOME}"
+        [[ -z "$workspace_root" ]] && workspace_root="$HOME"
+        WORKSPACE="$workspace_root/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
+    fi
     echo -e "${GREEN}    ✅ 已从 accounts.json 加载账号配置${NC}"
 }
 

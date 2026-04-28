@@ -1,5 +1,6 @@
 # Local tool state
 .claude/
+.codex
 .codex/
 
 # Python cache
@@ -15,6 +16,7 @@ __pycache__/
 # Logs and temp files
 *.log
 *.tmp
+path/
 
 # Runtime workspaces and generated analysis outputs
 coredump-workspace-*/
@@ -24,6 +26,7 @@ workspace/
 version_status.tsv
 workspace_manifest.json
 workspace_summary.md
+download.log
 
 # Package downloads and transient analysis files when generated in-tree
 *.deb

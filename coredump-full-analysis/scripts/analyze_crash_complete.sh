@@ -32,6 +32,9 @@ ARCH="${ARCH:-x86}"
 SELECTED_VERSIONS="${SELECTED_VERSIONS:-}"
 WORKSPACE="${WORKSPACE:-}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-180}"  # 进度上报间隔（秒），0表示禁用
+AUTO_FIX_SUBMIT="${AUTO_FIX_SUBMIT:-false}"
+TARGET_BRANCH="${TARGET_BRANCH:-origin/develop/eagle}"
+REVIEWERS=()
 SUMMARY_DIR_NAME="6.总结报告"
 VERSION_STATUS_FILE=""
 STEP_STATUS=""
@@ -144,6 +147,9 @@ ${GREEN}选项:${NC}
                            例如: x86, x86_64, arm64
     --versions <list>     仅分析指定版本，逗号分隔
                            例如: 5.8.32,5.8.33
+    --auto-fix-submit     分析后自动检查 target branch 是否已修复，并对已注册 fixer 的模式尝试自动提交
+    --target-branch <br>  自动修复提交目标分支（默认: origin/develop/eagle）
+    --reviewer <email>    自动提交时附加 reviewer，可多次指定
     --workspace <dir>      工作目录（默认: 自动创建带时间戳的目录 ~/coredump-workspace-YYYYMMDD-HHMMSS）
     --help, -h            显示此帮助信息
 
@@ -156,6 +162,9 @@ ${GREEN}示例:${NC}
 
     # 仅重跑指定版本
     $0 --packages dde-session-ui --workspace /path/to/workspace --versions 5.8.32
+
+    # 分析后自动检查已修复并提交可自动修复的问题
+    $0 --packages dde-launcher --auto-fix-submit --target-branch origin/develop/eagle
 
 ${BLUE}=============================================================================
 ${NC}
@@ -194,6 +203,18 @@ parse_args() {
                 SELECTED_VERSIONS="$2"
                 shift 2
                 ;;
+            --auto-fix-submit)
+                AUTO_FIX_SUBMIT=true
+                shift
+                ;;
+            --target-branch)
+                TARGET_BRANCH="$2"
+                shift 2
+                ;;
+            --reviewer)
+                REVIEWERS+=("$2")
+                shift 2
+                ;;
             --workspace)
                 WORKSPACE="$2"
                 shift 2
@@ -217,6 +238,42 @@ parse_args() {
         exit 1
     fi
 
+}
+
+auto_fix_and_submit_for_version() {
+    local package="$1"
+    local version="$2"
+    local auto_fix_script="$SCRIPT_DIR/auto_fix_submit.py"
+
+    if [[ "$AUTO_FIX_SUBMIT" != "true" ]]; then
+        set_step_result "skipped" "auto fix submit disabled"
+        return 0
+    fi
+
+    if [[ ! -f "$auto_fix_script" ]]; then
+        set_step_result "skipped" "auto_fix_submit.py missing"
+        return 0
+    fi
+
+    echo -e "${YELLOW}━━━ 步骤6: 自动修复与提交检查 $version ━━━${NC}"
+    local cmd=(python3 "$auto_fix_script"
+        --package "$package"
+        --version "$version"
+        --workspace "$WORKSPACE"
+        --target-branch "$TARGET_BRANCH")
+
+    local reviewer
+    for reviewer in "${REVIEWERS[@]}"; do
+        cmd+=(--reviewer "$reviewer")
+    done
+
+    if "${cmd[@]}" 2>&1; then
+        set_step_result "ok" "auto fix submit check completed"
+        return 0
+    fi
+
+    set_step_result "failed" "auto fix submit check failed"
+    return 1
 }
 
 # 打印进度
@@ -850,6 +907,13 @@ main() {
                 ((fail_count++)) || true
             fi
             log_version_status "$clean_version" "analysis" "${STEP_STATUS:-unknown}" "${STEP_MESSAGE:-}"
+
+            if auto_fix_and_submit_for_version "$PACKAGE" "$clean_version"; then
+                ((success_count++)) || true
+            else
+                ((fail_count++)) || true
+            fi
+            log_version_status "$clean_version" "autofix" "${STEP_STATUS:-unknown}" "${STEP_MESSAGE:-}"
 
             echo ""
 

@@ -20,8 +20,8 @@ CONFIG_DIR="$SCRIPT_DIR/../config"
 SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
 LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
 
-# 工作目录优先级：--workspace > WORKSPACE 环境变量 > 当前目录
-WORKSPACE="${WORKSPACE:-$(pwd)}"
+# 工作目录优先级：--workspace > WORKSPACE 环境变量 > 账户配置根目录/home
+WORKSPACE="${WORKSPACE:-}"
 source "$LOAD_ACCOUNTS_SCRIPT"
 load_accounts_or_die system
 
@@ -91,6 +91,12 @@ parse_args "$@"
 if [[ -z "$PACKAGE" ]]; then
     show_help
     exit 1
+fi
+
+if [[ -z "$WORKSPACE" ]]; then
+    workspace_root="${ACCOUNTS_WORKSPACE_ROOT:-$HOME}"
+    [[ -z "$workspace_root" ]] && workspace_root="$HOME"
+    WORKSPACE="$workspace_root/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
 fi
 
 echo ""

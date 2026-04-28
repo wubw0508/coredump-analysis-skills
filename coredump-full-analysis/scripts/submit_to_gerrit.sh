@@ -268,59 +268,86 @@ generate_commit_message() {
 
     if [[ ! -f "$analysis_file" ]]; then
         cat << EOF
-fix($package): 修复崩溃问题
+[coredump-analysis] fix: 修复 ${package} 崩溃问题
 
-从自动化崩溃分析系统生成的修复补丁。
+崩溃信息:
+- 包名: $package
+- 崩溃版本: $version
+- 架构: $arch
+- 系统版本: unknown
+- Crash ID: unknown
+- Crash Count: 0
+- Signal: unknown
+- App Layer: N/A
+- 修复详细堆栈:
+N/A
 
-包名: $package
-版本号: $version
-架构: $arch
-分析结论: 已根据当前版本分析结果生成修复代码，请结合对应分析报告复核提交内容。
+本次修复说明:
+已根据自动化崩溃分析系统生成修复补丁，缺少 analysis.json，需结合分析报告复核。
+
+Log: 基于自动化崩溃分析结果生成修复补丁
+Influence: 需结合对应分析报告确认影响功能点
 EOF
         return 0
     fi
 
-    local total_crashes=$(jq -r '.summary.total_crash_records' "$analysis_file" 2>/dev/null || echo "0")
-    local fixable_count=$(jq -r '.summary.fixable_count' "$analysis_file" 2>/dev/null || echo "0")
-    local unique_crashes=$(jq -r '.summary.unique_crashes' "$analysis_file" 2>/dev/null || echo "0")
-    local recommendations
-    recommendations=$(jq -r '.recommendations[]?' "$analysis_file" 2>/dev/null)
-    local conclusions
-    conclusions=$(jq -r '.crashes[] | select(.fixable == true or .fixable == "uncertain") | .fix_reason' "$analysis_file" 2>/dev/null | sort -u | head -n 5)
-    local representative_stacks
-    representative_stacks=$(jq -r '
-        .crashes[:5][] |
-        "Crash ID: " + (.id // "unknown"),
-        "Signal: " + (.signal // "unknown"),
-        "Count: " + ((.count // 0) | tostring),
-        "App Layer Symbol: " + ((.app_layer_symbol // "") | if . == "" then "N/A" else . end),
-        "Analysis Conclusion: " + ((.fix_reason // "") | if . == "" then "N/A" else . end),
-        "Crash Stack:",
-        ((.stack_info // "") | split("\n")[:8] | join("\n")),
-        ""
-    ' "$analysis_file" 2>/dev/null)
+    local crash_json
+    crash_json=$(jq -c '
+        (.crashes[] | select(.fixable == true)) //
+        (.crashes[] | select(.fixable == "uncertain")) //
+        .crashes[0]
+    ' "$analysis_file" 2>/dev/null | head -n 1)
+
+    local crash_id crash_count signal signal_desc sys_version app_layer crash_stack root_cause fix_desc crash_desc
+    crash_id=$(echo "$crash_json" | jq -r '.id // "unknown"' 2>/dev/null)
+    crash_count=$(echo "$crash_json" | jq -r '(.count // 0) | tostring' 2>/dev/null)
+    signal=$(echo "$crash_json" | jq -r '.signal // "unknown"' 2>/dev/null)
+    sys_version=$(echo "$crash_json" | jq -r '.sys_v_number // "unknown"' 2>/dev/null)
+    app_layer=$(echo "$crash_json" | jq -r '(.app_layer_symbol // "") | if . == "" then "N/A" else . end' 2>/dev/null)
+    crash_stack=$(echo "$crash_json" | jq -r '(.stack_info // "") | if . == "" then "N/A" else (split("\n")[:12] | join("\n")) end' 2>/dev/null)
+    root_cause=$(echo "$crash_json" | jq -r '(.fix_reason // "") | if . == "" then "需要结合分析报告进一步确认" else . end' 2>/dev/null)
+    fix_desc=$(echo "$crash_json" | jq -r '(.fix_type // "") | if . == "" or . == "null" then "请结合分析报告确认修复方式" else . end' 2>/dev/null)
+    crash_desc=$(echo "$crash_json" | jq -r '
+        if (.app_layer_symbol // "") != "" then
+            .app_layer_symbol
+        elif (.pattern_name // "") != "" and (.pattern_name // "") != "unknown" then
+            .pattern_name
+        elif (.fix_reason // "") != "" then
+            .fix_reason
+        else
+            "崩溃问题"
+        end
+    ' 2>/dev/null)
+
+    case "$signal" in
+        SIGSEGV) signal_desc="段错误 - 非法内存访问" ;;
+        SIGABRT) signal_desc="主动终止 - 检测到严重错误" ;;
+        SIGBUS) signal_desc="总线错误 - 内存对齐问题" ;;
+        SIGFPE) signal_desc="浮点异常 - 除零或溢出" ;;
+        *) signal_desc="未知信号" ;;
+    esac
 
     cat << EOF
-fix($package): 修复崩溃问题
+[coredump-analysis] fix: 修复 ${crash_desc}
 
-从自动化崩溃分析系统生成的修复补丁。
+崩溃信息:
+- 包名: $package
+- 崩溃版本: $version
+- 架构: $arch
+- 系统版本: $sys_version
+- Crash ID: $crash_id
+- Crash Count: $crash_count
+- Signal: $signal ($signal_desc)
+- App Layer: $app_layer
+- 修复详细堆栈:
+$crash_stack
 
-包名: $package
-版本号: $version
-架构: $arch
-唯一崩溃数: $unique_crashes
-总崩溃记录数: $total_crashes
-可修复崩溃数: $fixable_count
+本次修复说明:
+- Root Cause: $root_cause
+- Fix: $fix_desc
 
-分析结论:
-$(if [[ -n "$conclusions" ]]; then echo "$conclusions"; elif [[ -n "$recommendations" ]]; then echo "$recommendations"; else echo "需要结合分析报告进一步确认"; fi)
-
-具体解决崩溃堆栈:
-$(if [[ -n "$representative_stacks" ]]; then echo "$representative_stacks"; else echo "N/A"; fi)
-
-分析报告: ${report_file#$workspace/}
-
-Change-Id: I$(date +%Y%m%d%H%M%S%N | md5sum | head -c 40)
+Log: 基于崩溃分析结果修复 ${crash_desc}
+Influence: 请重点验证 ${package} 相关崩溃路径及 ${report_file#$workspace/} 涉及功能点
 EOF
 }
 

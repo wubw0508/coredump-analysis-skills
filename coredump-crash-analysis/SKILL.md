@@ -139,41 +139,39 @@ python3 analyze_blackwidget_crashes.py \
    ```
 2. 应用修复代码
 3. 提交到 Gerrit，Commit message 格式如下：
-   ```
-   fix(<package>): 修复 <crash_description>
+   ```text
+   fix/feat/chore: 提交信息说明
 
-   Crash ID: <crash_id>
-   Crash Count: <count>
-   Signal: <signal> (<signal_description>)
-   Package Version: <version>
-   Architecture: <arch> (x86/arm64/x86_64/loongarch64)
-   System Version: <sys_version> (如 1070-1075)
-   App Layer: <app_layer_symbol>
-   Crash Stack:
+   崩溃信息:
+   - 崩溃版本: <version>
+   - 架构: <arch> (x86/arm64/x86_64/loongarch64)
+   - 修复详细堆栈:
    <full_stack_trace>
 
-   Root Cause: <root_cause>
-   Fix: <fix_description>
+   本次修复说明:
+   <fix_description>
+
+   Log: 基于产品说明本次修复内容
+   Influence: 影响哪些功能点
    ```
    **Commit message 示例**：
-   ```
-   fix(dde-session-ui): 修复 QWidget::show() 空指针崩溃
+   ```text
+   fix: 修复 QWidget::show() 空指针崩溃
 
-   Crash ID: 12345678-1234-1234-1234-123456789abc
-   Crash Count: 45
-   Signal: SIGSEGV (段错误 - 非法内存访问)
-   Package Version: 5.7.41.11
-   Architecture: x86
-   System Version: 1070-1075
-   App Layer: QWidget::show()
-   Crash Stack:
+   崩溃信息:
+   - 崩溃版本: 5.7.41.11
+   - 架构: x86
+   - 修复详细堆栈:
    #0  QWidget::show()  at /path/to/widget.cpp:123
    #1  QMetaObject::activate()  at /path/to/qobject.cpp:456
    #2  QTimer::timeout()  at /path/to/qtimer.cpp:789
    #3  g_main_context_iteration()  at glib.cpp:101
 
-   Root Cause: 对象未初始化就调用 show()
-   Fix: 在调用前检查对象指针 if (obj) { obj->show(); }
+   本次修复说明:
+   在调用前检查对象指针 if (obj) { obj->show(); }
+
+   Log: 修复 QWidget::show() 空指针崩溃
+   Influence: 影响 QWidget::show() 触发的界面展示路径
    ```
 4. 推送到 Gerrit：
    ```bash

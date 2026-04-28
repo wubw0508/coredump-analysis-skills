@@ -25,6 +25,7 @@ CODE_DIR="$WORKSPACE/3.代码管理/dde-launcher"
 FILTERED_CSV="$WORKSPACE/2.数据筛选/filtered_dde-launcher_crash_data.csv"
 STATS_JSON="$WORKSPACE/2.数据筛选/dde-launcher_crash_statistics.json"
 REPORT_FILE="$WORKSPACE/5.崩溃分析/dde-launcher_crash_analysis_report.md"
+PATH_DIR="$WORKSPACE/path"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/load_accounts.sh"
 load_accounts_or_die system gerrit
@@ -32,6 +33,8 @@ load_accounts_or_die system gerrit
 echo -e "${BLUE}=============================================================================${NC}"
 echo -e "${BLUE}       dde-launcher 崩溃分析完整自动化流程${NC}"
 echo -e "${BLUE}=============================================================================${NC}"
+
+mkdir -p "$PATH_DIR"
 
 # 步骤1: 检查代码仓库
 echo -e "${CYAN}[步骤1] 检查代码仓库${NC}"
@@ -51,9 +54,9 @@ with open('${STATS_JSON}', 'r') as f:
     stats = json.load(f)
 for ver, data in sorted(stats.get('by_version', {}).items(), key=lambda x: -x[1]['total_crashes']):
     print(f'{ver}:{data[\"total_crashes\"]}:{data[\"unique_crashes\"]}')
-" > /tmp/versions.txt
+" > "$PATH_DIR/versions.txt"
 
-cat /tmp/versions.txt | head -5
+cat "$PATH_DIR/versions.txt" | head -5
 echo "..."
 
 # 步骤3: 下载缺失的包
@@ -66,9 +69,9 @@ with open('${STATS_JSON}', 'r') as f:
     stats = json.load(f)
 versions_needed = set(stats.get('by_version', {}).keys())
 print('\n'.join(sorted(versions_needed)))
-" > /tmp/need_versions.txt
+" > "$PATH_DIR/need_versions.txt"
 
-for version in $(cat /tmp/need_versions.txt); do
+for version in $(cat "$PATH_DIR/need_versions.txt"); do
     if [[ -f "dde-launcher_${version}_amd64.deb" ]] && [[ -s "dde-launcher_${version}_amd64.deb" ]]; then
         continue
     fi
@@ -195,7 +198,7 @@ for c in app[:5]:
         echo "" >> "$REPORT_FILE"
     fi
 
-done < /tmp/versions.txt
+done < "$PATH_DIR/versions.txt"
 
 # 完成报告
 echo "" >> "$REPORT_FILE"
