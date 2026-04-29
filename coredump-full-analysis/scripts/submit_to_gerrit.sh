@@ -38,6 +38,9 @@ ${GREEN}选项:${NC}
     --dry-run              试运行，不实际提交
     --yes, --auto-confirm  非交互模式，自动确认提交
     --force-recreate-branch 分支已存在时自动删除并重建
+    --print-commit-message  仅输出模板生成的 commit message 并退出
+    --crash-context-file    指定崩溃上下文 JSON 文件，用于生成精确 commit message
+    # 覆盖字段优先从 crash context JSON 读取，无需单独传参
     --help, -h            显示此帮助信息
 
 ${GREEN}示例:${NC}
@@ -66,6 +69,8 @@ parse_args() {
     DRY_RUN=false
     AUTO_CONFIRM=false
     FORCE_RECREATE_BRANCH=false
+    PRINT_COMMIT_MESSAGE=false
+    CRASH_CONTEXT_FILE=""
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -100,6 +105,14 @@ parse_args() {
             --force-recreate-branch)
                 FORCE_RECREATE_BRANCH=true
                 shift
+                ;;
+            --print-commit-message)
+                PRINT_COMMIT_MESSAGE=true
+                shift
+                ;;
+            --crash-context-file)
+                CRASH_CONTEXT_FILE="$2"
+                shift 2
                 ;;
             --help|-h)
                 show_help
@@ -292,23 +305,29 @@ EOF
     fi
 
     local crash_json
-    crash_json=$(jq -c '
-        (.crashes[] | select(.fixable == true)) //
-        (.crashes[] | select(.fixable == "uncertain")) //
-        .crashes[0]
-    ' "$analysis_file" 2>/dev/null | head -n 1)
+    if [[ -n "$CRASH_CONTEXT_FILE" && -f "$CRASH_CONTEXT_FILE" ]]; then
+        crash_json=$(cat "$CRASH_CONTEXT_FILE")
+    else
+        crash_json=$(jq -c '
+            (.crashes[] | select(.fixable == true)) //
+            (.crashes[] | select(.fixable == "uncertain")) //
+            .crashes[0]
+        ' "$analysis_file" 2>/dev/null | head -n 1)
+    fi
 
-    local crash_id crash_count signal signal_desc sys_version app_layer crash_stack root_cause fix_desc crash_desc
+    local crash_id crash_count signal signal_desc sys_version app_layer crash_stack root_cause fix_desc crash_desc log_desc influence_desc
     crash_id=$(echo "$crash_json" | jq -r '.id // "unknown"' 2>/dev/null)
     crash_count=$(echo "$crash_json" | jq -r '(.count // 0) | tostring' 2>/dev/null)
     signal=$(echo "$crash_json" | jq -r '.signal // "unknown"' 2>/dev/null)
     sys_version=$(echo "$crash_json" | jq -r '.sys_v_number // "unknown"' 2>/dev/null)
     app_layer=$(echo "$crash_json" | jq -r '(.app_layer_symbol // "") | if . == "" then "N/A" else . end' 2>/dev/null)
     crash_stack=$(echo "$crash_json" | jq -r '(.stack_info // "") | if . == "" then "N/A" else (split("\n")[:12] | join("\n")) end' 2>/dev/null)
-    root_cause=$(echo "$crash_json" | jq -r '(.fix_reason // "") | if . == "" then "需要结合分析报告进一步确认" else . end' 2>/dev/null)
-    fix_desc=$(echo "$crash_json" | jq -r '(.fix_type // "") | if . == "" or . == "null" then "请结合分析报告确认修复方式" else . end' 2>/dev/null)
+    root_cause=$(echo "$crash_json" | jq -r 'if (.root_cause_override // "") != "" then .root_cause_override elif (.fix_reason // "") != "" then .fix_reason else "需要结合分析报告进一步确认" end' 2>/dev/null)
+    fix_desc=$(echo "$crash_json" | jq -r 'if (.fix_desc_override // "") != "" then .fix_desc_override elif (.fix_type // "") != "" and (.fix_type // "") != "null" then .fix_type else "请结合分析报告确认修复方式" end' 2>/dev/null)
     crash_desc=$(echo "$crash_json" | jq -r '
-        if (.app_layer_symbol // "") != "" then
+        if (.crash_desc_override // "") != "" then
+            .crash_desc_override
+        elif (.app_layer_symbol // "") != "" then
             .app_layer_symbol
         elif (.pattern_name // "") != "" and (.pattern_name // "") != "unknown" then
             .pattern_name
@@ -318,6 +337,8 @@ EOF
             "崩溃问题"
         end
     ' 2>/dev/null)
+    log_desc=$(echo "$crash_json" | jq -r 'if (.log_override // "") != "" then .log_override else "" end' 2>/dev/null)
+    influence_desc=$(echo "$crash_json" | jq -r 'if (.influence_override // "") != "" then .influence_override else "" end' 2>/dev/null)
 
     case "$signal" in
         SIGSEGV) signal_desc="段错误 - 非法内存访问" ;;
@@ -346,8 +367,8 @@ $crash_stack
 - Root Cause: $root_cause
 - Fix: $fix_desc
 
-Log: 基于崩溃分析结果修复 ${crash_desc}
-Influence: 请重点验证 ${package} 相关崩溃路径及 ${report_file#$workspace/} 涉及功能点
+Log: ${log_desc:-基于崩溃分析结果修复 ${crash_desc}}
+Influence: ${influence_desc:-请重点验证 ${package} 相关崩溃路径及 ${report_file#$workspace/} 涉及功能点}
 EOF
 }
 
@@ -520,6 +541,11 @@ EOF
 # 主函数
 main() {
     parse_args "$@"
+
+    if [[ "$PRINT_COMMIT_MESSAGE" == "true" ]]; then
+        generate_commit_message "$PACKAGE" "$VERSION" "$WORKSPACE"
+        exit 0
+    fi
 
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

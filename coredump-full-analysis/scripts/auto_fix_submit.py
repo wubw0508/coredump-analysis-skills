@@ -12,12 +12,13 @@
 import argparse
 import importlib
 import json
+import os
 import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from fixers.common import get_fix_specs as get_common_fix_specs
 
@@ -158,7 +159,48 @@ def create_commit(code_dir: Path, message: str) -> Optional[str]:
         rev = run_git(code_dir, ["rev-parse", "HEAD"])
         return rev.stdout.strip()
     finally:
-        msg_file.unlink(missing_ok=True)
+        if msg_file.exists():
+            msg_file.unlink()
+
+
+def generate_commit_message_via_template(package: str, version: str, workspace: Path, crash_context: Dict, spec: Dict) -> str:
+    script_path = Path(__file__).with_name("submit_to_gerrit.sh")
+    if not script_path.exists():
+        raise FileNotFoundError(f"submit_to_gerrit.sh not found: {script_path}")
+
+    env = os.environ.copy()
+    env.setdefault("SKILLS_DIR", str(script_path.parent.parent.parent))
+    context = dict(crash_context)
+    overrides = spec.get("commit_message_overrides") or {}
+    if overrides:
+        context["crash_desc_override"] = overrides.get("crash_desc", "")
+        context["root_cause_override"] = overrides.get("root_cause", "")
+        context["fix_desc_override"] = overrides.get("fix_desc", "")
+        context["log_override"] = overrides.get("log", "")
+        context["influence_override"] = overrides.get("influence", "")
+    context_file = workspace / "5.崩溃分析" / package / f"version_{version_to_dir(clean_version(version))}" / "auto_fix_commit_context.json"
+    context_file.write_text(json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8")
+    result = subprocess.run(
+        [
+            "bash",
+            str(script_path),
+            "--package",
+            package,
+            "--version",
+            version,
+            "--workspace",
+            str(workspace),
+            "--print-commit-message",
+            "--crash-context-file",
+            str(context_file),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True,
+        env=env,
+    )
+    return result.stdout.strip()
 
 
 def cherry_pick_commit(code_dir: Path, commit: str) -> subprocess.CompletedProcess:
@@ -175,6 +217,161 @@ def push_to_gerrit(code_dir: Path, target_branch: str, reviewers: List[str]) -> 
         refspec += "%r=" + ",".join(reviewers)
     result = run_git(code_dir, ["push", "origin", refspec], check=False)
     return result.returncode == 0
+
+
+def apply_string_replacements(file_path: Path, replacements: List[Tuple[str, str]]) -> bool:
+    text = file_path.read_text(encoding="utf-8")
+    updated = text
+    for old, new in replacements:
+        if old not in updated:
+            return False
+        updated = updated.replace(old, new, 1)
+    if updated == text:
+        return False
+    file_path.write_text(updated, encoding="utf-8")
+    return True
+
+
+def apply_appitem_dbus_guard(appitem_cpp: Path) -> bool:
+    helper_block = """
+static QString readDockEntryStringProperty(DockEntryInter *entry, const char *propertyName, const QString &fallback = QString())
+{
+    if (!entry) {
+        return fallback;
+    }
+
+    QDBusMessage message = QDBusMessage::createMethodCall(
+        QStringLiteral(\"com.deepin.dde.daemon.Dock\"),
+        entry->path(),
+        QStringLiteral(\"org.freedesktop.DBus.Properties\"),
+        QStringLiteral(\"Get\"));
+    message << QStringLiteral(\"dde.dock.Entry\") << QString::fromLatin1(propertyName);
+
+    QDBusMessage reply = QDBusConnection::sessionBus().call(message);
+    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
+        return fallback;
+    }
+
+    const QDBusVariant variant = reply.arguments().constFirst().value<QDBusVariant>();
+    return variant.variant().toString();
+}
+
+static bool readDockEntryBoolProperty(DockEntryInter *entry, const char *propertyName, bool fallback = false)
+{
+    if (!entry) {
+        return fallback;
+    }
+
+    QDBusMessage message = QDBusMessage::createMethodCall(
+        QStringLiteral(\"com.deepin.dde.daemon.Dock\"),
+        entry->path(),
+        QStringLiteral(\"org.freedesktop.DBus.Properties\"),
+        QStringLiteral(\"Get\"));
+    message << QStringLiteral(\"dde.dock.Entry\") << QString::fromLatin1(propertyName);
+
+    QDBusMessage reply = QDBusConnection::sessionBus().call(message);
+    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
+        return fallback;
+    }
+
+    const QDBusVariant variant = reply.arguments().constFirst().value<QDBusVariant>();
+    return variant.variant().toBool();
+}
+
+static quint32 readDockEntryUIntProperty(DockEntryInter *entry, const char *propertyName, quint32 fallback = 0)
+{
+    if (!entry) {
+        return fallback;
+    }
+
+    QDBusMessage message = QDBusMessage::createMethodCall(
+        QStringLiteral(\"com.deepin.dde.daemon.Dock\"),
+        entry->path(),
+        QStringLiteral(\"org.freedesktop.DBus.Properties\"),
+        QStringLiteral(\"Get\"));
+    message << QStringLiteral(\"dde.dock.Entry\") << QString::fromLatin1(propertyName);
+
+    QDBusMessage reply = QDBusConnection::sessionBus().call(message);
+    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
+        return fallback;
+    }
+
+    const QDBusVariant variant = reply.arguments().constFirst().value<QDBusVariant>();
+    return variant.variant().toUInt();
+}
+""".strip("\n")
+
+    replacements = [
+        (
+            "#include <QGSettings>\n",
+            "#include <QGSettings>\n#include <QDBusMessage>\n#include <QDBusReply>\n#include <QDBusVariant>\n",
+        ),
+        (
+            "QPoint AppItem::MousePressPos;\n",
+            f"QPoint AppItem::MousePressPos;\n\n{helper_block}\n",
+        ),
+        (
+            "    setObjectName(m_itemEntryInter->name());\n",
+            "    setObjectName(m_entry.path());\n",
+        ),
+        (
+            "    m_id = m_itemEntryInter->id();\n    m_active = m_itemEntryInter->isActive();\n    m_currentWindowId = m_itemEntryInter->currentWindow();\n",
+            "    m_id = readDockEntryStringProperty(m_itemEntryInter, \"Id\");\n    m_active = readDockEntryBoolProperty(m_itemEntryInter, \"IsActive\");\n    m_currentWindowId = readDockEntryUIntProperty(m_itemEntryInter, \"CurrentWindow\");\n",
+        ),
+        (
+            "    updateWindowInfos(m_itemEntryInter->windowInfos());\n    refreshIcon();\n",
+            "    QTimer::singleShot(0, this, [this] {\n        setObjectName(readDockEntryStringProperty(m_itemEntryInter, \"Name\", m_entry.path()));\n        updateWindowInfos(m_itemEntryInter->windowInfos());\n        refreshIcon();\n    });\n",
+        ),
+    ]
+    return apply_string_replacements(appitem_cpp, replacements)
+
+
+def read_file_at_ref(code_dir: Path, git_ref: str, relative_path: str) -> Optional[str]:
+    result = run_git(code_dir, ["show", f"{git_ref}:{relative_path}"], check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def is_fix_already_present(code_dir: Path, target_ref: str, spec: Dict) -> bool:
+    auto_fixer = spec.get("auto_fixer")
+    if auto_fixer == "apply_appitem_dbus_guard":
+        target_file = spec.get("target_file") or "frame/item/appitem.cpp"
+        content = read_file_at_ref(code_dir, target_ref, target_file)
+        if not content:
+            return False
+        markers = [
+            'readDockEntryStringProperty(m_itemEntryInter, "Id")',
+            'readDockEntryBoolProperty(m_itemEntryInter, "IsActive")',
+            'readDockEntryUIntProperty(m_itemEntryInter, "CurrentWindow")',
+            'QTimer::singleShot(0, this, [this] {',
+        ]
+        return all(marker in content for marker in markers)
+    return False
+
+
+def apply_auto_fix(code_dir: Path, spec: Dict) -> Tuple[bool, str]:
+    auto_fixer = spec.get("auto_fixer")
+    if auto_fixer == "cherry_pick_known_fix":
+        preferred_commit = spec.get("preferred_commit")
+        if not preferred_commit:
+            return False, "missing preferred_commit for cherry-pick fixer"
+        pick = cherry_pick_commit(code_dir, preferred_commit)
+        if pick.returncode == 0:
+            return True, preferred_commit
+        abort_cherry_pick(code_dir)
+        return False, f"cherry-pick failed for commit {preferred_commit}"
+
+    if auto_fixer == "apply_appitem_dbus_guard":
+        target_file = spec.get("target_file") or "frame/item/appitem.cpp"
+        file_path = code_dir / target_file
+        if not file_path.exists():
+            return False, f"target file not found: {file_path}"
+        if apply_appitem_dbus_guard(file_path):
+            return True, f"updated {target_file}"
+        return False, f"unable to apply appitem dbus guard to {target_file}"
+
+    return False, f"auto fixer '{auto_fixer}' is not supported by dispatcher"
 
 
 def main():
@@ -248,62 +445,70 @@ def main():
             result["manual_required"].append(entry)
             continue
 
+        if is_fix_already_present(code_dir, args.target_branch, spec):
+            entry["reason"] = spec.get("description") or "target branch already contains equivalent fix"
+            result["already_fixed"].append(entry)
+            continue
+
         pending_auto_fix.append((entry, spec, crash))
 
-    unique_fix_commits = []
-    seen_commits = set()
+    auto_fix_actions = []
+    seen_actions = set()
     for entry, spec, _ in pending_auto_fix:
         auto_fixer = spec.get("auto_fixer")
         preferred_commit = spec.get("preferred_commit")
-        if auto_fixer != "cherry_pick_known_fix" or not preferred_commit:
-            result["manual_required"].append(
-                {
-                    **entry,
-                    "reason": f"auto fixer '{auto_fixer}' is not supported by dispatcher",
-                }
-            )
+        target_file = spec.get("target_file")
+        action_key = (auto_fixer, preferred_commit or "", target_file or "", entry["pattern_name"])
+        if action_key in seen_actions:
             continue
-        if preferred_commit in seen_commits:
-            continue
-        seen_commits.add(preferred_commit)
-        unique_fix_commits.append((preferred_commit, spec, entry))
+        seen_actions.add(action_key)
+        auto_fix_actions.append((entry, spec))
 
-    if unique_fix_commits:
+    if auto_fix_actions:
         branch_name = build_fix_branch_name(args.package, clean_version(args.version))
         result["branch_name"] = branch_name
         checkout_target_branch(code_dir, args.target_branch, branch_name)
 
         applied = []
-        for commit, spec, entry in unique_fix_commits:
-            pick = cherry_pick_commit(code_dir, commit)
-            if pick.returncode == 0:
+        for entry, spec in auto_fix_actions:
+            ok, detail = apply_auto_fix(code_dir, spec)
+            if ok:
                 applied.append(
                     {
                         "pattern_name": entry["pattern_name"],
-                        "source_commit": commit,
-                        "reason": spec.get("description") or "cherry-picked known upstream fix",
+                        "detail": detail,
+                        "reason": spec.get("description") or spec.get("auto_fixer") or "auto fix applied",
                     }
                 )
                 continue
 
-            abort_cherry_pick(code_dir)
             result["manual_required"].append(
                 {
                     **entry,
-                    "reason": f"cherry-pick failed for commit {commit}",
+                    "reason": detail,
                 }
             )
 
         if applied:
-            result["auto_fixed"].extend(applied)
-            head = run_git(code_dir, ["rev-parse", "HEAD"])
-            result["commit_hash"] = head.stdout.strip()
-            if not args.dry_run:
-                result["submitted"] = push_to_gerrit(
-                    code_dir,
-                    args.target_branch.replace("origin/", "", 1),
-                    args.reviewer,
-                )
+            commit_message = generate_commit_message_via_template(args.package, args.version, workspace, pending_auto_fix[0][2], auto_fix_actions[0][1])
+            commit_hash = create_commit(code_dir, commit_message)
+            if commit_hash:
+                result["auto_fixed"].extend(applied)
+                result["commit_hash"] = commit_hash
+                if not args.dry_run:
+                    result["submitted"] = push_to_gerrit(
+                        code_dir,
+                        args.target_branch.replace("origin/", "", 1),
+                        args.reviewer,
+                    )
+            else:
+                for item in applied:
+                    result["manual_required"].append(
+                        {
+                            "pattern_name": item["pattern_name"],
+                            "reason": "auto fixer produced no source changes to commit",
+                        }
+                    )
 
     result_file.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
 
