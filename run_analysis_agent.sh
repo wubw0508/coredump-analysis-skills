@@ -207,6 +207,20 @@ fi
 IFS=',' read -ra PACKAGE_ARRAY <<< "$PACKAGES"
 PACKAGE_COUNT=${#PACKAGE_ARRAY[@]}
 
+# 包名处理函数
+# 搜索崩溃时使用不带base/的包名，下载和分析代码时使用带base/的包名
+get_crash_search_name() {
+    local pkg="$1"
+    # 去掉base/前缀用于崩溃数据搜索
+    echo "${pkg#base/}"
+}
+
+get_download_name() {
+    local pkg="$1"
+    # 保留base/前缀用于下载和代码分析
+    echo "$pkg"
+}
+
 if [[ -z "$START_DATE" && -z "$END_DATE" ]]; then
     DATE_RANGE_LABEL="全部可下载数据（不按日期过滤）"
 elif [[ -n "$START_DATE" && -n "$END_DATE" ]]; then
@@ -401,6 +415,27 @@ launch_package() {
         cmd+=(--reviewer "$reviewer")
     done
     if SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" "${cmd[@]}" 2>&1; then
+        # 如果启用了自动修复提交，调用修复映射脚本
+        if [[ "$AUTO_FIX_SUBMIT" == "true" ]]; then
+            echo -e "${YELLOW}开始修复映射和Gerrit提交...${NC}"
+            local fix_script="$SKILLS_DIR/coredump-crash-analysis/scripts/analyze_with_fix_mapping.py"
+            if [[ -f "$fix_script" ]]; then
+                # 获取用于崩溃搜索的包名（去掉base/前缀）
+                local search_pkg=$(get_crash_search_name "$pkg")
+                python3 "$fix_script" \
+                    --package "$search_pkg" \
+                    --workspace "$WORKSPACE" \
+                    --target-branch "$TARGET_BRANCH" 2>&1
+                local fix_exit_code=$?
+                if [[ $fix_exit_code -eq 0 ]]; then
+                    echo -e "${GREEN}✅ 修复映射完成${NC}"
+                else
+                    echo -e "${RED}❌ 修复映射失败${NC}"
+                fi
+            else
+                echo -e "${YELLOW}⚠️ 修复映射脚本不存在: $fix_script${NC}"
+            fi
+        fi
         log_package_status "$pkg" "completed" "0" "analysis completed"
         return 0
     fi

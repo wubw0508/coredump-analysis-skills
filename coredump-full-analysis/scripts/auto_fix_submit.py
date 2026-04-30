@@ -12,14 +12,15 @@
 import argparse
 import importlib
 import json
-import os
 import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
+from auto_fix_types import FixPlan, FixResult
+from cluster_crashes import cluster_crashes
 from fixers.common import get_fix_specs as get_common_fix_specs
 
 
@@ -46,6 +47,20 @@ def get_fix_specs(package: str) -> Dict[str, Dict]:
     if module and hasattr(module, "get_fix_specs"):
         specs.update(module.get_fix_specs())
     return specs
+
+
+def get_package_fix_plan_builder(package: str):
+    module = load_package_fixer_module(package)
+    if module and hasattr(module, "build_fix_plan_for_cluster"):
+        return module.build_fix_plan_for_cluster
+    return None
+
+
+def get_package_fix_applier(package: str):
+    module = load_package_fixer_module(package)
+    if module and hasattr(module, "apply_fix_plan"):
+        return module.apply_fix_plan
+    return None
 
 
 def build_crash_haystack(crash: Dict) -> str:
@@ -133,6 +148,11 @@ def make_result_path(package: str, version: str, workspace: Path) -> Path:
     return workspace / "5.崩溃分析" / package / f"version_{version_dir}" / "auto_fix_result.json"
 
 
+def make_cluster_result_path(package: str, version: str, workspace: Path) -> Path:
+    version_dir = version_to_dir(clean_version(version))
+    return workspace / "5.崩溃分析" / package / f"version_{version_dir}" / "auto_fix_clusters_result.json"
+
+
 def checkout_target_branch(code_dir: Path, target_ref: str, branch_name: str):
     run_git(code_dir, ["fetch", "origin"], check=False)
     if git_ref_exists(code_dir, target_ref):
@@ -147,8 +167,11 @@ def build_fix_branch_name(package: str, version: str) -> str:
     return f"auto-fix/{package}/v{version.replace('.', '_').replace('+', '_')}-{date_str}"
 
 
-def create_commit(code_dir: Path, message: str) -> Optional[str]:
-    run_git(code_dir, ["add", "-A"], check=False)
+def create_commit(code_dir: Path, message: str, files_to_stage: List[str]) -> Optional[str]:
+    if not files_to_stage:
+        return None
+    run_git(code_dir, ["reset", "-q", "HEAD", "--"], check=True)
+    run_git(code_dir, ["add", "--"] + files_to_stage, check=True)
     diff = run_git(code_dir, ["diff", "--cached", "--name-only"], check=False)
     if diff.returncode != 0 or not diff.stdout.strip():
         return None
@@ -161,46 +184,6 @@ def create_commit(code_dir: Path, message: str) -> Optional[str]:
     finally:
         if msg_file.exists():
             msg_file.unlink()
-
-
-def generate_commit_message_via_template(package: str, version: str, workspace: Path, crash_context: Dict, spec: Dict) -> str:
-    script_path = Path(__file__).with_name("submit_to_gerrit.sh")
-    if not script_path.exists():
-        raise FileNotFoundError(f"submit_to_gerrit.sh not found: {script_path}")
-
-    env = os.environ.copy()
-    env.setdefault("SKILLS_DIR", str(script_path.parent.parent.parent))
-    context = dict(crash_context)
-    overrides = spec.get("commit_message_overrides") or {}
-    if overrides:
-        context["crash_desc_override"] = overrides.get("crash_desc", "")
-        context["root_cause_override"] = overrides.get("root_cause", "")
-        context["fix_desc_override"] = overrides.get("fix_desc", "")
-        context["log_override"] = overrides.get("log", "")
-        context["influence_override"] = overrides.get("influence", "")
-    context_file = workspace / "5.崩溃分析" / package / f"version_{version_to_dir(clean_version(version))}" / "auto_fix_commit_context.json"
-    context_file.write_text(json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8")
-    result = subprocess.run(
-        [
-            "bash",
-            str(script_path),
-            "--package",
-            package,
-            "--version",
-            version,
-            "--workspace",
-            str(workspace),
-            "--print-commit-message",
-            "--crash-context-file",
-            str(context_file),
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=True,
-        env=env,
-    )
-    return result.stdout.strip()
 
 
 def cherry_pick_commit(code_dir: Path, commit: str) -> subprocess.CompletedProcess:
@@ -219,159 +202,102 @@ def push_to_gerrit(code_dir: Path, target_branch: str, reviewers: List[str]) -> 
     return result.returncode == 0
 
 
-def apply_string_replacements(file_path: Path, replacements: List[Tuple[str, str]]) -> bool:
-    text = file_path.read_text(encoding="utf-8")
-    updated = text
-    for old, new in replacements:
-        if old not in updated:
-            return False
-        updated = updated.replace(old, new, 1)
-    if updated == text:
-        return False
-    file_path.write_text(updated, encoding="utf-8")
-    return True
-
-
-def apply_appitem_dbus_guard(appitem_cpp: Path) -> bool:
-    helper_block = """
-static QString readDockEntryStringProperty(DockEntryInter *entry, const char *propertyName, const QString &fallback = QString())
-{
-    if (!entry) {
-        return fallback;
-    }
-
-    QDBusMessage message = QDBusMessage::createMethodCall(
-        QStringLiteral(\"com.deepin.dde.daemon.Dock\"),
-        entry->path(),
-        QStringLiteral(\"org.freedesktop.DBus.Properties\"),
-        QStringLiteral(\"Get\"));
-    message << QStringLiteral(\"dde.dock.Entry\") << QString::fromLatin1(propertyName);
-
-    QDBusMessage reply = QDBusConnection::sessionBus().call(message);
-    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
-        return fallback;
-    }
-
-    const QDBusVariant variant = reply.arguments().constFirst().value<QDBusVariant>();
-    return variant.variant().toString();
-}
-
-static bool readDockEntryBoolProperty(DockEntryInter *entry, const char *propertyName, bool fallback = false)
-{
-    if (!entry) {
-        return fallback;
-    }
-
-    QDBusMessage message = QDBusMessage::createMethodCall(
-        QStringLiteral(\"com.deepin.dde.daemon.Dock\"),
-        entry->path(),
-        QStringLiteral(\"org.freedesktop.DBus.Properties\"),
-        QStringLiteral(\"Get\"));
-    message << QStringLiteral(\"dde.dock.Entry\") << QString::fromLatin1(propertyName);
-
-    QDBusMessage reply = QDBusConnection::sessionBus().call(message);
-    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
-        return fallback;
-    }
-
-    const QDBusVariant variant = reply.arguments().constFirst().value<QDBusVariant>();
-    return variant.variant().toBool();
-}
-
-static quint32 readDockEntryUIntProperty(DockEntryInter *entry, const char *propertyName, quint32 fallback = 0)
-{
-    if (!entry) {
-        return fallback;
-    }
-
-    QDBusMessage message = QDBusMessage::createMethodCall(
-        QStringLiteral(\"com.deepin.dde.daemon.Dock\"),
-        entry->path(),
-        QStringLiteral(\"org.freedesktop.DBus.Properties\"),
-        QStringLiteral(\"Get\"));
-    message << QStringLiteral(\"dde.dock.Entry\") << QString::fromLatin1(propertyName);
-
-    QDBusMessage reply = QDBusConnection::sessionBus().call(message);
-    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
-        return fallback;
-    }
-
-    const QDBusVariant variant = reply.arguments().constFirst().value<QDBusVariant>();
-    return variant.variant().toUInt();
-}
-""".strip("\n")
-
-    replacements = [
-        (
-            "#include <QGSettings>\n",
-            "#include <QGSettings>\n#include <QDBusMessage>\n#include <QDBusReply>\n#include <QDBusVariant>\n",
-        ),
-        (
-            "QPoint AppItem::MousePressPos;\n",
-            f"QPoint AppItem::MousePressPos;\n\n{helper_block}\n",
-        ),
-        (
-            "    setObjectName(m_itemEntryInter->name());\n",
-            "    setObjectName(m_entry.path());\n",
-        ),
-        (
-            "    m_id = m_itemEntryInter->id();\n    m_active = m_itemEntryInter->isActive();\n    m_currentWindowId = m_itemEntryInter->currentWindow();\n",
-            "    m_id = readDockEntryStringProperty(m_itemEntryInter, \"Id\");\n    m_active = readDockEntryBoolProperty(m_itemEntryInter, \"IsActive\");\n    m_currentWindowId = readDockEntryUIntProperty(m_itemEntryInter, \"CurrentWindow\");\n",
-        ),
-        (
-            "    updateWindowInfos(m_itemEntryInter->windowInfos());\n    refreshIcon();\n",
-            "    QTimer::singleShot(0, this, [this] {\n        setObjectName(readDockEntryStringProperty(m_itemEntryInter, \"Name\", m_entry.path()));\n        updateWindowInfos(m_itemEntryInter->windowInfos());\n        refreshIcon();\n    });\n",
-        ),
-    ]
-    return apply_string_replacements(appitem_cpp, replacements)
-
-
-def read_file_at_ref(code_dir: Path, git_ref: str, relative_path: str) -> Optional[str]:
-    result = run_git(code_dir, ["show", f"{git_ref}:{relative_path}"], check=False)
-    if result.returncode != 0:
-        return None
-    return result.stdout
-
-
-def is_fix_already_present(code_dir: Path, target_ref: str, spec: Dict) -> bool:
-    auto_fixer = spec.get("auto_fixer")
-    if auto_fixer == "apply_appitem_dbus_guard":
-        target_file = spec.get("target_file") or "frame/item/appitem.cpp"
-        content = read_file_at_ref(code_dir, target_ref, target_file)
-        if not content:
-            return False
-        markers = [
-            'readDockEntryStringProperty(m_itemEntryInter, "Id")',
-            'readDockEntryBoolProperty(m_itemEntryInter, "IsActive")',
-            'readDockEntryUIntProperty(m_itemEntryInter, "CurrentWindow")',
-            'QTimer::singleShot(0, this, [this] {',
+def build_cluster_commit_message(plan: FixPlan, cluster) -> str:
+    representative = cluster.representative_crash
+    log_line = representative.get("stack_info") or representative.get("app_layer_symbol") or cluster.title
+    return "\n\n".join(
+        [
+            plan.commit_subject,
+            f"Crash: {cluster.title}，影响 {cluster.total_count} 条记录，涉及版本: {', '.join(cluster.versions)}。",
+            f"Root Cause: {plan.root_cause}",
+            f"Fix: {plan.fix_description}",
+            f"Log: {log_line}",
+            f"Influence: {plan.influence}",
         ]
-        return all(marker in content for marker in markers)
-    return False
+    )
 
 
-def apply_auto_fix(code_dir: Path, spec: Dict) -> Tuple[bool, str]:
-    auto_fixer = spec.get("auto_fixer")
-    if auto_fixer == "cherry_pick_known_fix":
-        preferred_commit = spec.get("preferred_commit")
-        if not preferred_commit:
-            return False, "missing preferred_commit for cherry-pick fixer"
-        pick = cherry_pick_commit(code_dir, preferred_commit)
-        if pick.returncode == 0:
-            return True, preferred_commit
-        abort_cherry_pick(code_dir)
-        return False, f"cherry-pick failed for commit {preferred_commit}"
+def run_cluster_auto_fix(
+    package: str,
+    version: str,
+    workspace: Path,
+    target_branch: str,
+    reviewers: List[str],
+    dry_run: bool,
+) -> Dict:
+    code_dir = workspace / "3.代码管理" / package
+    analysis_file = load_analysis_file(package, version, workspace)
+    result_file = make_cluster_result_path(package, version, workspace)
 
-    if auto_fixer == "apply_appitem_dbus_guard":
-        target_file = spec.get("target_file") or "frame/item/appitem.cpp"
-        file_path = code_dir / target_file
-        if not file_path.exists():
-            return False, f"target file not found: {file_path}"
-        if apply_appitem_dbus_guard(file_path):
-            return True, f"updated {target_file}"
-        return False, f"unable to apply appitem dbus guard to {target_file}"
+    builder = get_package_fix_plan_builder(package)
+    applier = get_package_fix_applier(package)
+    if not builder or not applier:
+        raise RuntimeError(f"package fixer does not support cluster auto fix: {package}")
 
-    return False, f"auto fixer '{auto_fixer}' is not supported by dispatcher"
+    data = json.loads(analysis_file.read_text(encoding="utf-8"))
+    crashes = data.get("crashes", [])
+    clusters = cluster_crashes(package, crashes)
+    branch_name = build_fix_branch_name(package, clean_version(version))
+    result = {
+        "package": package,
+        "version": version,
+        "target_branch": target_branch,
+        "analysis_time": datetime.now().isoformat(),
+        "total_crashes": len(crashes),
+        "total_clusters": len(clusters),
+        "clusters": [],
+        "auto_fixed": [],
+        "analysis_only": [],
+        "submitted": False,
+        "branch_name": branch_name,
+        "commit_hashes": [],
+    }
+
+    if not dry_run:
+        checkout_target_branch(code_dir, target_branch, branch_name)
+
+    for cluster in clusters:
+        plan = builder(cluster)
+        dry_run_snapshots = {}
+        if dry_run:
+            for target_file in plan.target_files:
+                target_path = code_dir / target_file
+                if target_path.exists():
+                    dry_run_snapshots[target_path] = target_path.read_text(encoding="utf-8")
+                else:
+                    dry_run_snapshots[target_path] = None
+
+        fix_result: FixResult = applier(code_dir, plan)
+        if dry_run:
+            for target_path, original_text in dry_run_snapshots.items():
+                if original_text is None:
+                    if target_path.exists():
+                        target_path.unlink()
+                else:
+                    target_path.write_text(original_text, encoding="utf-8")
+
+        cluster_entry = {
+            "cluster": cluster.to_dict(),
+            "plan": plan.to_dict(),
+            "result": fix_result.to_dict(),
+        }
+        result["clusters"].append(cluster_entry)
+
+        if fix_result.changed:
+            if not dry_run:
+                commit_hash = create_commit(code_dir, build_cluster_commit_message(plan, cluster), fix_result.files_changed)
+                fix_result.commit_hash = commit_hash
+                if commit_hash:
+                    result["commit_hashes"].append(commit_hash)
+            result["auto_fixed"].append(fix_result.to_dict())
+        else:
+            result["analysis_only"].append(fix_result.to_dict())
+
+    if result["commit_hashes"] and not dry_run:
+        result["submitted"] = push_to_gerrit(code_dir, target_branch.replace("origin/", "", 1), reviewers)
+
+    result_file.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    return result
 
 
 def main():
@@ -394,8 +320,37 @@ def main():
         print(f"错误: 分析文件不存在: {analysis_file}", file=sys.stderr)
         return 1
     if not (code_dir / ".git").exists():
-        print(f"错误: 代码目录不是 git 仓库: {code_dir}", file=sys.stderr)
-        return 1
+        result = {
+            "package": args.package,
+            "version": args.version,
+            "target_branch": args.target_branch,
+            "analysis_time": datetime.now().isoformat(),
+            "status": "skipped",
+            "reason": "source repository is not available",
+            "code_dir": str(code_dir),
+            "submitted": False,
+        }
+        result_file.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"跳过自动修复: 代码目录不是 git 仓库: {code_dir}")
+        print(f"自动修复结果已保存: {result_file}")
+        return 0
+
+    if get_package_fix_plan_builder(args.package) and get_package_fix_applier(args.package):
+        cluster_result = run_cluster_auto_fix(
+            package=args.package,
+            version=args.version,
+            workspace=workspace,
+            target_branch=args.target_branch,
+            reviewers=args.reviewer,
+            dry_run=args.dry_run,
+        )
+        print(f"根因簇自动修复结果已保存: {make_cluster_result_path(args.package, args.version, workspace)}")
+        print(f"崩溃记录: {cluster_result['total_crashes']}")
+        print(f"根因簇: {cluster_result['total_clusters']}")
+        print(f"自动修复簇: {len(cluster_result['auto_fixed'])}")
+        print(f"仅记录分析簇: {len(cluster_result['analysis_only'])}")
+        print(f"已提交 Gerrit: {cluster_result['submitted']}")
+        return 0
 
     specs = get_fix_specs(args.package)
     data = json.loads(analysis_file.read_text(encoding="utf-8"))
@@ -445,70 +400,73 @@ def main():
             result["manual_required"].append(entry)
             continue
 
-        if is_fix_already_present(code_dir, args.target_branch, spec):
-            entry["reason"] = spec.get("description") or "target branch already contains equivalent fix"
-            result["already_fixed"].append(entry)
-            continue
-
         pending_auto_fix.append((entry, spec, crash))
 
-    auto_fix_actions = []
-    seen_actions = set()
+    unique_fix_commits = []
+    seen_commits = set()
     for entry, spec, _ in pending_auto_fix:
         auto_fixer = spec.get("auto_fixer")
         preferred_commit = spec.get("preferred_commit")
-        target_file = spec.get("target_file")
-        action_key = (auto_fixer, preferred_commit or "", target_file or "", entry["pattern_name"])
-        if action_key in seen_actions:
-            continue
-        seen_actions.add(action_key)
-        auto_fix_actions.append((entry, spec))
-
-    if auto_fix_actions:
-        branch_name = build_fix_branch_name(args.package, clean_version(args.version))
-        result["branch_name"] = branch_name
-        checkout_target_branch(code_dir, args.target_branch, branch_name)
-
-        applied = []
-        for entry, spec in auto_fix_actions:
-            ok, detail = apply_auto_fix(code_dir, spec)
-            if ok:
-                applied.append(
-                    {
-                        "pattern_name": entry["pattern_name"],
-                        "detail": detail,
-                        "reason": spec.get("description") or spec.get("auto_fixer") or "auto fix applied",
-                    }
-                )
-                continue
-
+        if auto_fixer != "cherry_pick_known_fix" or not preferred_commit:
             result["manual_required"].append(
                 {
                     **entry,
-                    "reason": detail,
+                    "reason": f"auto fixer '{auto_fixer}' is not supported by dispatcher",
                 }
             )
+            continue
+        if preferred_commit in seen_commits:
+            continue
+        seen_commits.add(preferred_commit)
+        unique_fix_commits.append((preferred_commit, spec, entry))
 
-        if applied:
-            commit_message = generate_commit_message_via_template(args.package, args.version, workspace, pending_auto_fix[0][2], auto_fix_actions[0][1])
-            commit_hash = create_commit(code_dir, commit_message)
-            if commit_hash:
-                result["auto_fixed"].extend(applied)
-                result["commit_hash"] = commit_hash
-                if not args.dry_run:
-                    result["submitted"] = push_to_gerrit(
-                        code_dir,
-                        args.target_branch.replace("origin/", "", 1),
-                        args.reviewer,
-                    )
-            else:
-                for item in applied:
-                    result["manual_required"].append(
+    if unique_fix_commits:
+        branch_name = build_fix_branch_name(args.package, clean_version(args.version))
+        result["branch_name"] = branch_name
+
+        applied = []
+        if args.dry_run:
+            for commit, spec, entry in unique_fix_commits:
+                applied.append(
+                    {
+                        "pattern_name": entry["pattern_name"],
+                        "source_commit": commit,
+                        "reason": spec.get("description") or "cherry-picked known upstream fix",
+                    }
+                )
+        else:
+            checkout_target_branch(code_dir, args.target_branch, branch_name)
+
+            for commit, spec, entry in unique_fix_commits:
+                pick = cherry_pick_commit(code_dir, commit)
+                if pick.returncode == 0:
+                    applied.append(
                         {
-                            "pattern_name": item["pattern_name"],
-                            "reason": "auto fixer produced no source changes to commit",
+                            "pattern_name": entry["pattern_name"],
+                            "source_commit": commit,
+                            "reason": spec.get("description") or "cherry-picked known upstream fix",
                         }
                     )
+                    continue
+
+                abort_cherry_pick(code_dir)
+                result["manual_required"].append(
+                    {
+                        **entry,
+                        "reason": f"cherry-pick failed for commit {commit}",
+                    }
+                )
+
+        if applied:
+            result["auto_fixed"].extend(applied)
+            if not args.dry_run:
+                head = run_git(code_dir, ["rev-parse", "HEAD"])
+                result["commit_hash"] = head.stdout.strip()
+                result["submitted"] = push_to_gerrit(
+                    code_dir,
+                    args.target_branch.replace("origin/", "", 1),
+                    args.reviewer,
+                )
 
     result_file.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
 

@@ -314,6 +314,14 @@ setup_workspace() {
     echo -e "${GREEN}✅ 工作目录已创建: $WORKSPACE${NC}"
 }
 
+# 包名处理函数
+# 搜索崩溃时使用不带base/的包名，下载和分析代码时使用带base/的包名
+get_crash_search_name() {
+    local pkg="$1"
+    # 去掉base/前缀用于崩溃数据搜索
+    echo "${pkg#base/}"
+}
+
 # 步骤1: 下载数据
 download_data() {
     print_step 1 "数据下载" >&2
@@ -325,6 +333,9 @@ download_data() {
         exit 1
     fi
 
+    # 获取用于崩溃搜索的包名（去掉base/前缀）
+    local search_package=$(get_crash_search_name "$PACKAGE")
+
     # 直接使用原始脚本，不复制到workspace
     echo -e "${YELLOW}执行: bash $download_script${NC}" >&2
     echo "" >&2
@@ -333,12 +344,12 @@ download_data() {
     local cmd=(bash "$download_script" --sys-version "$SYS_VERSION")
     [[ -n "$START_DATE" ]] && cmd+=(--start-date "$START_DATE")
     [[ -n "$END_DATE" ]] && cmd+=(--end-date "$END_DATE")
-    cmd+=("$PACKAGE" "$ARCH" crash)
+    cmd+=("$search_package" "$ARCH" crash)
     echo -e "${YELLOW}执行: ${cmd[*]}${NC}" >&2
     "${cmd[@]}" >&2
 
-    # 查找下载的文件
-    local csv_file=$(find "$WORKSPACE/1.数据下载" -name "${PACKAGE}_X86_crash_*.csv" -type f | sort | tail -1)
+    # 查找下载的文件（使用搜索包名）
+    local csv_file=$(find "$WORKSPACE/1.数据下载" -name "${search_package}_X86_crash_*.csv" -type f | sort | tail -1)
 
     if [[ -z "$csv_file" ]]; then
         echo -e "${RED}错误: 数据下载失败，未找到CSV文件${NC}" >&2
@@ -365,15 +376,18 @@ filter_data() {
         exit 1
     fi
 
-    echo -e "${YELLOW}执行: python3 $filter_script --workspace $WORKSPACE $PACKAGE${NC}" >&2
+    # 获取用于崩溃搜索的包名（去掉base/前缀）
+    local search_package=$(get_crash_search_name "$PACKAGE")
+
+    echo -e "${YELLOW}执行: python3 $filter_script --workspace $WORKSPACE $search_package${NC}" >&2
     echo "" >&2
 
     # 直接使用原始脚本，输出全部发送到 stderr
     cd "$WORKSPACE/2.数据筛选"
-    python3 "$filter_script" --workspace "$WORKSPACE" "$PACKAGE" >&2
+    python3 "$filter_script" --workspace "$WORKSPACE" "$search_package" >&2
 
-    local filtered_csv="$WORKSPACE/2.数据筛选/filtered_${PACKAGE}_crash_data.csv"
-    local stats_json="$WORKSPACE/2.数据筛选/${PACKAGE}_crash_statistics.json"
+    local filtered_csv="$WORKSPACE/2.数据筛选/filtered_${search_package}_crash_data.csv"
+    local stats_json="$WORKSPACE/2.数据筛选/${search_package}_crash_statistics.json"
 
     if [[ -f "$filtered_csv" ]]; then
         echo -e "${GREEN}✅ 数据筛选完成${NC}" >&2
