@@ -25,7 +25,7 @@ vi ~/.openclaw/skills/coredump-analysis-skills/accounts.json
 | 服务 | 字段 | 说明 |
 |------|------|------|
 | **Shuttle** | `shuttle.account` | 下载 deb/dbgsym 包，必填 |
-| **Gerrit** | `gerrit.account` | 克隆源码仓库，必填 |
+| **Gerrit** | `gerrit.account` | 克隆源码仓库，必填；用户需自行将 `~/.ssh/id_rsa.pub` 配置到 Gerrit 的设置-“SSH Keys”里面 |
 | **Metabase** | `metabase.account` | 下载崩溃数据，必填 |
 | **System** | `system.sudo_password` | 安装调试符号包时需要，必填 |
 | **Paths** | `paths.workspace` | 可选的默认工作目录根路径；不填则使用 `$HOME` |
@@ -303,7 +303,7 @@ vi ~/.openclaw/skills/coredump-analysis-skills/accounts.json
 
 **关键配置项**：
 - `shuttle.account` — Shuttle 下载账号，必填
-- `gerrit.account` — Gerrit 代码仓库账号，必填
+- `gerrit.account` — Gerrit 代码仓库账号，必填；用户需自行将 `~/.ssh/id_rsa.pub` 配置到 Gerrit 的设置-“SSH Keys”里面
 - `metabase.account` — Metabase 崩溃数据账号，必填
 - `system.sudo_password` — 本机 sudo 密码，必填
 

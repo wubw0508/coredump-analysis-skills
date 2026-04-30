@@ -323,6 +323,7 @@ phase1_prepare() {
             echo -e "${YELLOW}    克隆仓库: ssh://${gerrit_user}@${gerrit_host}:${gerrit_port}/${PACKAGE}${NC}"
             git clone "ssh://${gerrit_user}@${gerrit_host}:${gerrit_port}/${PACKAGE}" 2>/dev/null || {
                 echo -e "${YELLOW}    警告: 克隆失败，请手动克隆或检查SSH配置${NC}"
+                echo -e "${YELLOW}    提示：请确认是否已将 ~/.ssh/id_rsa.pub 配置到 Gerrit 的设置-\"SSH Keys\" 里面${NC}"
             }
 
             if [[ -d "$PACKAGE/.git" ]]; then

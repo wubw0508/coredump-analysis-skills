@@ -491,6 +491,7 @@ download_source_for_version() {
     else
         set_step_result "failed" "source checkout failed"
         echo -e "${RED}❌ 代码切换失败${NC}"
+        echo -e "${YELLOW}提示：如果是 Gerrit 克隆失败，请确认是否已将 ~/.ssh/id_rsa.pub 配置到 Gerrit 的设置-\"SSH Keys\" 里面${NC}"
         return 1
     fi
 }

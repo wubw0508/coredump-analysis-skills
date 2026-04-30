@@ -145,10 +145,12 @@ else
         }
     else
         echo -e "${YELLOW}  Gerrit 克隆失败，尝试 GitHub 镜像...${NC}"
+        echo -e "${YELLOW}  请确认是否已将 ~/.ssh/id_rsa.pub 配置到 Gerrit 的设置-\"SSH Keys\" 里面${NC}"
         if git clone "https://github.com/linuxdeepin/${PACKAGE}.git" "$CODE_PATH" 2>/dev/null; then
             echo -e "${GREEN}  GitHub 镜像克隆成功${NC}"
         else
             echo -e "${RED}错误：克隆代码失败${NC}"
+            echo -e "${YELLOW}提示：如果 Gerrit 无法访问，请检查是否已将 ~/.ssh/id_rsa.pub 配置到 Gerrit 的设置-\"SSH Keys\" 里面${NC}"
             exit 1
         fi
     fi

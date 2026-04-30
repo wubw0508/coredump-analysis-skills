@@ -229,6 +229,7 @@ bash coredump-full-analysis/scripts/analyze_crash_loop.sh \
 
 - 确认 `accounts.json` 中 Gerrit 用户名正确。
 - 检查 SSH key：`ls -la ~/.ssh/id_rsa`。
+- 确认用户已自行将 `~/.ssh/id_rsa.pub` 配置到 Gerrit 的设置-“SSH Keys”里面。
 - 测试连接：`ssh -p 29418 <user>@gerrit.uniontech.com gerrit version`。
 
 **deb/dbgsym 没有下载或没有安装**

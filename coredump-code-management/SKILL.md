@@ -41,6 +41,7 @@ cd $COREDUMP_WORKSPACE/3.代码管理
 
 ## 前置要求
 
+- 用户需自行将 `~/.ssh/id_rsa.pub` 配置到 Gerrit 的设置-“SSH Keys”里面
 - 配置 SSH 密钥到 Gerrit（`~/.ssh/id_rsa`）
 - 有 Gerrit 仓库访问权限
 - 已安装 git 和 scp
@@ -153,6 +154,7 @@ export GERRIT_PORT="29418"
 **Q: 克隆失败，提示权限不足**
 
 - 检查 SSH 密钥是否配置: `ls -la ~/.ssh/id_rsa`
+- 确认用户已自行将 `~/.ssh/id_rsa.pub` 配置到 Gerrit 的设置-“SSH Keys”里面
 - 测试连接: `ssh -T gerrit.uniontech.com`
 - 确认 `accounts.json` 中 Gerrit 账号密码正确
 
