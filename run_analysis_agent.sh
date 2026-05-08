@@ -36,6 +36,8 @@ AUTO_FIX_SUBMIT=false
 TARGET_BRANCH="origin/develop/eagle"
 REVIEWERS=()
 SUMMARY_DIR_NAME="6.总结报告"
+GENERATE_GERRIT_WEB_REPORT=true
+SERVE_GERRIT_WEB_REPORT=false
 PACKAGE_STATUS_FILE=""
 LOG_DIR=""
 
@@ -71,6 +73,8 @@ ${GREEN}可选参数:${NC}
     --auto-fix-submit     分析后自动检查 target branch 是否已修复，并对已注册 fixer 的模式尝试自动提交
     --target-branch <br>  自动修复提交目标分支 (默认: origin/develop/eagle)
     --reviewer <email>    自动提交时附加 reviewer，可多次指定
+    --no-gerrit-web-report      禁用分析结束后的 Gerrit 网页报告生成
+    --serve-gerrit-web-report   分析结束后启动本地服务查看 Gerrit 网页报告
     --help, -h           显示帮助
 
 ${GREEN}示例:${NC}
@@ -104,12 +108,16 @@ ${GREEN}示例:${NC}
     # 分析后自动检查已修复并提交可自动修复的问题
     $0 --packages dde-launcher --auto-fix-submit --target-branch origin/develop/eagle
 
+    # 分析完成后启动 Gerrit 网页报告本地服务
+    $0 --packages dde-dock --auto-fix-submit --serve-gerrit-web-report
+
 ${GREEN}兼容说明:${NC}
     仍兼容旧参数 --package，但新文档统一使用 --packages
 
 ${GREEN}输出文件:${NC}
     <workspace>/2.数据筛选/<package>_crash_statistics.json  - 统计报告
     <workspace>/2.数据筛选/filtered_<package>_crash_data.csv - 筛选后数据
+    <workspace>/6.总结报告/gerrit-web-report/index.html - Gerrit网页报告
 
 ${BLUE}=============================================================================
 ${NC}
@@ -172,6 +180,14 @@ while [[ $# -gt 0 ]]; do
         --reviewer)
             REVIEWERS+=("$2")
             shift 2
+            ;;
+        --no-gerrit-web-report)
+            GENERATE_GERRIT_WEB_REPORT=false
+            shift
+            ;;
+        --serve-gerrit-web-report)
+            SERVE_GERRIT_WEB_REPORT=true
+            shift
             ;;
         --help|-h)
             show_help
@@ -247,6 +263,8 @@ if [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
 fi
 echo "  自动修复提交: $AUTO_FIX_SUBMIT"
 echo "  自动修复目标分支: $TARGET_BRANCH"
+echo "  Gerrit网页报告: $GENERATE_GERRIT_WEB_REPORT"
+echo "  Gerrit网页服务: $SERVE_GERRIT_WEB_REPORT"
 echo ""
 
 # 从 accounts.json 读取凭据
@@ -391,6 +409,30 @@ generate_workspace_reports() {
         --failed-packages "$failed_packages"
 }
 
+generate_gerrit_web_report() {
+    if [[ "$GENERATE_GERRIT_WEB_REPORT" != "true" ]]; then
+        return 0
+    fi
+
+    local report_script="$SKILLS_DIR/coredump-full-analysis/scripts/generate_gerrit_web_report.py"
+    if [[ ! -f "$report_script" ]]; then
+        echo -e "${YELLOW}⚠️ 未找到 Gerrit 网页报告脚本: $report_script${NC}"
+        return 0
+    fi
+
+    local cmd=(python3 "$report_script" --workspace "$WORKSPACE")
+    if [[ "$SERVE_GERRIT_WEB_REPORT" == "true" ]]; then
+        cmd+=(--serve)
+    fi
+
+    echo -e "${YELLOW}生成 Gerrit 网页报告...${NC}"
+    if "${cmd[@]}"; then
+        echo -e "${GREEN}✅ Gerrit 网页报告已生成: $WORKSPACE/$SUMMARY_DIR_NAME/gerrit-web-report/index.html${NC}"
+    else
+        echo -e "${YELLOW}⚠️ Gerrit 网页报告生成失败，主分析结果不受影响${NC}"
+    fi
+}
+
 # 检查进程是否还在运行
 is_running() {
     kill -0 "$1" 2>/dev/null
@@ -464,6 +506,7 @@ if [[ "$RUN_BACKGROUND" == "true" ]]; then
             wait "$pid" || overall_exit=$?
         done
         generate_workspace_reports "" >> "$LOG_DIR/analysis_workspace_summary.log" 2>&1
+        generate_gerrit_web_report >> "$LOG_DIR/analysis_workspace_summary.log" 2>&1
         exit "$overall_exit"
     ) &
     summary_pid=$!
@@ -546,8 +589,10 @@ elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
         echo "    分析报告: $WORKSPACE/5.崩溃分析/${pkg}/"
     done
     generate_workspace_reports ""
+    generate_gerrit_web_report
     echo "  Workspace汇总: $WORKSPACE/$SUMMARY_DIR_NAME/run_manifest.md"
     echo "  跨包汇总: $WORKSPACE/$SUMMARY_DIR_NAME/all_packages_summary.md"
+    echo "  Gerrit网页报告: $WORKSPACE/$SUMMARY_DIR_NAME/gerrit-web-report/index.html"
     echo "  问题簇汇总: $WORKSPACE/$SUMMARY_DIR_NAME/root_cause_clusters.md"
     echo "  失败包清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_packages.txt"
     echo "  失败版本清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.md"
@@ -596,6 +641,7 @@ else
         failed_csv="${failed_csv%,}"
     fi
     generate_workspace_reports "$failed_csv"
+    generate_gerrit_web_report
 
     if [[ ${#FAILED_PACKAGES[@]} -gt 0 ]]; then
         echo ""
@@ -603,6 +649,7 @@ else
         printf '  - %s\n' "${FAILED_PACKAGES[@]}"
         echo ""
         echo "Workspace汇总: $WORKSPACE/$SUMMARY_DIR_NAME/run_manifest.md"
+        echo "Gerrit网页报告: $WORKSPACE/$SUMMARY_DIR_NAME/gerrit-web-report/index.html"
         echo "失败包清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_packages.txt"
         echo "失败版本清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.md"
         echo "重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_commands.sh"

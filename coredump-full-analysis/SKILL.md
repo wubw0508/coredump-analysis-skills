@@ -164,8 +164,48 @@ bash coredump-full-analysis/scripts/analyze_crash_complete.sh \
 | `<workspace>/5.崩溃分析/<package>/AI_analysis_report.md` | 面向 AI/人工阅读的汇总报告 |
 | `<workspace>/6.总结报告/final_conclusion.md` | 当前包最终总结 |
 | `<workspace>/6.总结报告/summary_statistics.json` | 当前包总结统计 |
+| `<workspace>/6.总结报告/gerrit-web-report/index.html` | 已提交 Gerrit 修复变更的本地网页报告 |
+| `<workspace>/6.总结报告/gerrit-web-report/data.json` | Gerrit 网页报告的结构化数据 |
 
 注意：`6.总结报告/` 是当前包的总结目录。多包顺序分析时，该目录里的 `final_conclusion.md` 和 `summary_statistics.json` 会被后续包覆盖；长期保留应优先查看每个包目录下的 `AI_analysis_report.md` 和 `full_analysis_report.md`。
+
+## Gerrit Web Report
+
+完整分析或 Agent 分析结束后，默认会尝试生成 Gerrit Web Report：
+
+```text
+<workspace>/6.总结报告/gerrit-web-report/index.html
+```
+
+手动生成：
+
+```bash
+python3 coredump-full-analysis/scripts/generate_gerrit_web_report.py \
+  --workspace /path/to/coredump-workspace
+```
+
+只使用本地记录、不查询 Gerrit：
+
+```bash
+python3 coredump-full-analysis/scripts/generate_gerrit_web_report.py \
+  --workspace /path/to/coredump-workspace \
+  --no-gerrit-enrich
+```
+
+生成后启动本地服务：
+
+```bash
+python3 coredump-full-analysis/scripts/generate_gerrit_web_report.py \
+  --workspace /path/to/coredump-workspace \
+  --serve
+```
+
+Agent 入口可用参数：
+
+```text
+--no-gerrit-web-report      禁用自动生成 Gerrit 网页报告
+--serve-gerrit-web-report   分析完成后启动本地服务查看报告
+```
 
 ## 分步执行
 

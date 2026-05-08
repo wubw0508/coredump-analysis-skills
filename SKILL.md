@@ -139,6 +139,32 @@ bash run_analysis_agent.sh --help
 - 账号或密码缺失时立即暂停流程，不做降级继续
 - deb/dbgsym 版本匹配支持 `-1`、`+build`、`.1-1` 等 Debian 构建后缀
 
+## Gerrit 网页报告
+
+分析结束后默认会尝试生成 Gerrit Web Report：
+
+```text
+<workspace>/6.总结报告/gerrit-web-report/index.html
+<workspace>/6.总结报告/gerrit-web-report/data.json
+```
+
+该报告聚合 workspace 中已经提交到 Gerrit 的修复变更，并尽量补全 Gerrit 状态、Change 链接、项目、分支和 reviewer 信息。Gerrit 查询失败时仍会生成本地报告，相关记录会显示为未补全。
+
+手动重新生成：
+
+```bash
+python3 coredump-full-analysis/scripts/generate_gerrit_web_report.py \
+  --workspace /path/to/coredump-workspace
+```
+
+离线生成，不查询 Gerrit：
+
+```bash
+python3 coredump-full-analysis/scripts/generate_gerrit_web_report.py \
+  --workspace /path/to/coredump-workspace \
+  --no-gerrit-enrich
+```
+
 ## 快速开始
 
 ### 方式1: Agent 一键分析（⭐推荐）
