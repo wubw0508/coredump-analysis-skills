@@ -179,13 +179,20 @@ class DebDownloader:
             logger.info(f"  文件已存在，跳过: {decoded_filename}")
             return True
 
+        # 根据架构构建可能的子目录路径
+        subdir_paths = [self.subdir]
+        if self.arch == "amd64":
+            subdir_paths.extend(["amd64", "unstable"])
+        elif self.arch == "arm64":
+            subdir_paths.extend(["arm64", "unstable-arm64"])
+        elif self.arch == "i386":
+            subdir_paths.extend(["i386"])
+        
         # 尝试多个可能的路径，使用URL解码后的文件名
-        possible_paths = [
-            f"/tasks/{task_id}/{self.subdir}/{decoded_filename}",
-            f"/tasks/{task_id}/{decoded_filename}",
-            f"/tasks/{task_id}/amd64/{decoded_filename}",
-            f"/tasks/{task_id}/unstable/{decoded_filename}",
-        ]
+        possible_paths = []
+        for subdir in subdir_paths:
+            possible_paths.append(f"/tasks/{task_id}/{subdir}/{decoded_filename}")
+        possible_paths.append(f"/tasks/{task_id}/{decoded_filename}")  # 直接的 task_id 路径
 
         for path in possible_paths:
             url = f"{self.base_url}{path}"

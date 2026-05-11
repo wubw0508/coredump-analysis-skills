@@ -142,23 +142,32 @@ find_deb_file() {
     local is_dbgsym="$4"
 
     # 尝试多种文件名格式
+    # 根据 ARCH 参数确定文件名中的架构后缀
+    local arch_suffix
+    case "$ARCH" in
+        x86) arch_suffix="i386" ;;
+        x86_64) arch_suffix="amd64" ;;
+        arm64) arch_suffix="arm64" ;;
+        *) arch_suffix="$ARCH" ;;
+    esac
+    
     local patterns=()
 
     if [[ "$is_dbgsym" = true ]]; then
         patterns=(
-            "${package}-dbgsym_${version}_amd64.deb"
-            "${package}-dbgsym_${version}-1_amd64.deb"
-            "${package}-dbgsym_1:${version}_amd64.deb"
-            "${package}-dbgsym_1:${version}-1_amd64.deb"
-            "${package}-dbg_${version}_amd64.deb"
-            "${package}-dbg_${version}-1_amd64.deb"
+            "${package}-dbgsym_${version}_${arch_suffix}.deb"
+            "${package}-dbgsym_${version}-1_${arch_suffix}.deb"
+            "${package}-dbgsym_1:${version}_${arch_suffix}.deb"
+            "${package}-dbgsym_1:${version}-1_${arch_suffix}.deb"
+            "${package}-dbg_${version}_${arch_suffix}.deb"
+            "${package}-dbg_${version}-1_${arch_suffix}.deb"
         )
     else
         patterns=(
-            "${package}_${version}_amd64.deb"
-            "${package}_${version}-1_amd64.deb"
-            "${package}_1:${version}_amd64.deb"
-            "${package}_1:${version}-1_amd64.deb"
+            "${package}_${version}_${arch_suffix}.deb"
+            "${package}_${version}-1_${arch_suffix}.deb"
+            "${package}_1:${version}_${arch_suffix}.deb"
+            "${package}_1:${version}-1_${arch_suffix}.deb"
         )
     fi
 
@@ -272,9 +281,9 @@ main() {
         if [[ -z "$deb_file" ]]; then
             echo -e "${YELLOW}  → 未找到主包${NC}"
             echo -e "  尝试的文件名:"
-            echo "    - ${PACKAGE}_${VERSION}_amd64.deb"
-            echo "    - ${PACKAGE}_${VERSION}-1_amd64.deb"
-            echo "    - ${PACKAGE}_1:${VERSION}_amd64.deb"
+            echo "    - ${PACKAGE}_${VERSION}_${arch_suffix}.deb"
+            echo "    - ${PACKAGE}_${VERSION}-1_${arch_suffix}.deb"
+            echo "    - ${PACKAGE}_1:${version}_${arch_suffix}.deb"
             success=false
         else
             echo -e "  → 找到文件: $(basename "$deb_file")"
@@ -328,8 +337,8 @@ main() {
         if [[ -z "$dbgsym_file" ]]; then
             echo -e "${YELLOW}  → 未找到dbgsym包${NC}"
             echo -e "  尝试的文件名:"
-            echo "    - ${PACKAGE}-dbgsym_${VERSION}_amd64.deb"
-            echo "    - ${PACKAGE}-dbg_${VERSION}_amd64.deb"
+            echo "    - ${PACKAGE}-dbgsym_${VERSION}_${arch_suffix}.deb"
+            echo "    - ${PACKAGE}-dbg_${VERSION}_${arch_suffix}.deb"
             echo -e "  这不会影响基本分析，但可能限制某些调试功能"
         else
             echo -e "  → 找到文件: $(basename "$dbgsym_file")"

@@ -59,6 +59,12 @@ import json
 import sys
 package = sys.argv[1]
 stats_file = sys.argv[2]
+
+# 处理架构映射
+task_arch = "${ARCH:-amd64}"
+if task_arch == "arm64":
+    task_arch = "aarch64"
+
 try:
     with open(stats_file) as f:
         stats = json.load(f)
@@ -68,9 +74,9 @@ except:
 task = {
     "package": package,
     "versions": top_versions,
-    "arch": "amd64",
+    "arch": task_arch,
     "type": ["deb", "dbgsym"],
-    "tasks": [{"package": package, "version": version, "arch": "amd64"} for version in top_versions]
+    "tasks": [{"package": package, "version": version, "arch": task_arch} for version in top_versions]
 }
 with open('download_tasks.json', 'w') as f:
     json.dump(task, f, indent=2, ensure_ascii=False)

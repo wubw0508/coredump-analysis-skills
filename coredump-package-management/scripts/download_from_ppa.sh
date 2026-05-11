@@ -55,8 +55,17 @@ PKG_URL="${BASE_URL}/${PKG_LETTER}/${PACKAGE}"
 mkdir -p "$OUTPUT_DIR"
 cd "$OUTPUT_DIR"
 
+# 根据 ARCH 参数确定文件名中的架构后缀
+local arch_suffix
+case "$ARCH" in
+    x86) arch_suffix="i386" ;;
+    x86_64) arch_suffix="amd64" ;;
+    arm64) arch_suffix="arm64" ;;
+    *) arch_suffix="$ARCH" ;;
+esac
+
 echo "下载主包..."
-MAIN_FILE="${PACKAGE}_${VERSION}_amd64.deb"
+MAIN_FILE="${PACKAGE}_${VERSION}_${arch_suffix}.deb"
 
 if [[ -f "$MAIN_FILE" ]]; then
     echo -e "${GREEN}主包已存在: $MAIN_FILE${NC}"
@@ -72,7 +81,7 @@ fi
 
 echo ""
 echo "下载调试包..."
-DBGSYM_FILE="${PACKAGE}-dbgsym_${VERSION}_amd64.deb"
+DBGSYM_FILE="${PACKAGE}-dbgsym_${VERSION}_${arch_suffix}.deb"
 
 if [[ -f "$DBGSYM_FILE" ]]; then
     echo -e "${GREEN}调试包已存在: $DBGSYM_FILE${NC}"

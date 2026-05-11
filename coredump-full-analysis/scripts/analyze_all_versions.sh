@@ -275,8 +275,17 @@ analyze_single_version() {
     echo -e "${CYAN}  [2] 下载安装包${NC}"
     mkdir -p "$PKG_DIR"
 
-    PKG_FILE="$PKG_DIR/dde-launcher_${VERSION}_amd64.deb"
-    DBG_FILE="$PKG_DIR/dde-launcher-dbgsym_${VERSION}_amd64.deb"
+    # 根据 ARCH 参数确定文件名中的架构后缀
+    local arch_suffix
+    case "$ARCH" in
+        x86) arch_suffix="i386" ;;
+        x86_64) arch_suffix="amd64" ;;
+        arm64) arch_suffix="arm64" ;;
+        *) arch_suffix="$ARCH" ;;
+    esac
+    
+    PKG_FILE="$PKG_DIR/dde-launcher_${VERSION}_${arch_suffix}.deb"
+    DBG_FILE="$PKG_DIR/dde-launcher-dbgsym_${VERSION}_${arch_suffix}.deb"
 
     # 下载主包
     if [[ ! -f "$PKG_FILE" ]] || [[ ! -s "$PKG_FILE" ]]; then

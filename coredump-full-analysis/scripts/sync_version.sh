@@ -287,11 +287,20 @@ sync_package() {
     local download_dir="$workspace/4.包管理/下载包"
 
     # 尝试多种文件名格式
+    # 根据 ARCH 参数确定文件名中的架构后缀
+    local arch_suffix
+    case "$ARCH" in
+        x86) arch_suffix="i386" ;;
+        x86_64) arch_suffix="amd64" ;;
+        arm64) arch_suffix="arm64" ;;
+        *) arch_suffix="$ARCH" ;;
+    esac
+    
     local deb_patterns=(
-        "${package}_${version}_amd64.deb"
-        "${package}_${version}-1_amd64.deb"
-        "${package}_1:${version}_amd64.deb"
-        "${package}_1:${version}-1_amd64.deb"
+        "${package}_${version}_${arch_suffix}.deb"
+        "${package}_${version}-1_${arch_suffix}.deb"
+        "${package}_1:${version}_${arch_suffix}.deb"
+        "${package}_1:${version}-1_${arch_suffix}.deb"
     )
 
     local deb_file=""
@@ -330,10 +339,10 @@ sync_package() {
 
     # 安装dbgsym包
     local dbgsym_patterns=(
-        "${package}-dbgsym_${version}_amd64.deb"
-        "${package}-dbgsym_${version}-1_amd64.deb"
-        "${package}-dbgsym_1:${version}_amd64.deb"
-        "${package}-dbgsym_1:${version}-1_amd64.deb"
+        "${package}-dbgsym_${version}_${arch_suffix}.deb"
+        "${package}-dbgsym_${version}-1_${arch_suffix}.deb"
+        "${package}-dbgsym_1:${version}_${arch_suffix}.deb"
+        "${package}-dbgsym_1:${version}-1_${arch_suffix}.deb"
     )
 
     local dbgsym_file=""
@@ -383,11 +392,20 @@ verify_version() {
     local download_dir="$4"
     local deb_found=false
 
+    # 根据 ARCH 参数确定文件名中的架构后缀
+    local arch_suffix
+    case "$ARCH" in
+        x86) arch_suffix="i386" ;;
+        x86_64) arch_suffix="amd64" ;;
+        arm64) arch_suffix="arm64" ;;
+        *) arch_suffix="$ARCH" ;;
+    esac
+    
     local deb_patterns=(
-        "${package}_${version}_amd64.deb"
-        "${package}_${version}-1_amd64.deb"
-        "${package}_1:${version}_amd64.deb"
-        "${package}_1:${version}-1_amd64.deb"
+        "${package}_${version}_${arch_suffix}.deb"
+        "${package}_${version}-1_${arch_suffix}.deb"
+        "${package}_1:${version}_${arch_suffix}.deb"
+        "${package}_1:${version}-1_${arch_suffix}.deb"
     )
 
     local package_file=""

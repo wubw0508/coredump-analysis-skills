@@ -86,9 +86,18 @@ while IFS='|' read -r version count priority; do
     echo -e "${CYAN}[$total_versions] 下载版本: $version (崩溃次数: $count)${NC}"
     echo -e "${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
+    # 根据 ARCH 参数确定文件名中的架构后缀
+    local arch_suffix
+    case "$ARCH" in
+        x86) arch_suffix="i386" ;;
+        x86_64) arch_suffix="amd64" ;;
+        arm64) arch_suffix="arm64" ;;
+        *) arch_suffix="$ARCH" ;;
+    esac
+    
     # 检查包是否已下载
-    if [[ -f "$DOWNLOAD_DIR/${PACKAGE}_${version}_amd64.deb" ]] || \
-       [[ -f "$DOWNLOAD_DIR/${PACKAGE}_${version%?????}_amd64.deb" ]]; then
+    if [[ -f "$DOWNLOAD_DIR/${PACKAGE}_${version}_${arch_suffix}.deb" ]] || \
+       [[ -f "$DOWNLOAD_DIR/${PACKAGE}_${version%?????}_${arch_suffix}.deb" ]]; then
         echo -e "${GREEN}    ✅ 包已存在，跳过下载${NC}"
         skipped_count=$((skipped_count + 1))
         echo ""
@@ -96,10 +105,10 @@ while IFS='|' read -r version count priority; do
     fi
 
     # 尝试下载主包
-    echo -e "${CYAN}  → 下载主包: ${PACKAGE}_${version}_amd64.deb${NC}"
+    echo -e "${CYAN}  → 下载主包: ${PACKAGE}_${version}_${arch_suffix}.deb${NC}"
     if apt-get download "${PACKAGE}=${version}" 2>/dev/null; then
         # 检查下载的文件
-        downloaded_file=$(ls -t "${PACKAGE}"*_amd64.deb 2>/dev/null | head -1)
+        downloaded_file=$(ls -t "${PACKAGE}"*"_${arch_suffix}.deb" 2>/dev/null | head -1)
         if [[ -n "$downloaded_file" ]]; then
             mv "$downloaded_file" "$DOWNLOAD_DIR/"
             echo -e "${GREEN}    ✅ 主包下载完成: $(basename "$downloaded_file")${NC}"
@@ -109,10 +118,10 @@ while IFS='|' read -r version count priority; do
     fi
 
     # 尝试下载dbgsym包
-    echo -e "${CYAN}  → 下载dbgsym包: ${PACKAGE}-dbgsym_${version}_amd64.deb${NC}"
+    echo -e "${CYAN}  → 下载dbgsym包: ${PACKAGE}-dbgsym_${version}_${arch_suffix}.deb${NC}"
     if apt-get download "${PACKAGE}-dbgsym=${version}" 2>/dev/null; then
         # 检查下载的文件
-        downloaded_file=$(ls -t "${PACKAGE}-dbgsym"*_amd64.deb 2>/dev/null | head -1)
+        downloaded_file=$(ls -t "${PACKAGE}-dbgsym"*"_${arch_suffix}.deb" 2>/dev/null | head -1)
         if [[ -n "$downloaded_file" ]]; then
             mv "$downloaded_file" "$DOWNLOAD_DIR/"
             echo -e "${GREEN}    ✅ dbgsym包下载完成: $(basename "$downloaded_file")${NC}"
@@ -121,7 +130,7 @@ while IFS='|' read -r version count priority; do
     else
         echo -e "${YELLOW}    ⚠️  无法下载 ${PACKAGE}-dbgsym=${version}${NC}"
         # 检查主包是否下载成功作为成功标志
-        if [[ -f "$DOWNLOAD_DIR/${PACKAGE}"*"${version}"*"_amd64.deb" ]]; then
+        if [[ -f "$DOWNLOAD_DIR/${PACKAGE}"*"${version}"*"_${arch_suffix}.deb" ]]; then
             success_count=$((success_count + 1))
         else
             failed_count=$((failed_count + 1))

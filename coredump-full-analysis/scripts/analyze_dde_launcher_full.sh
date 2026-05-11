@@ -72,7 +72,16 @@ print('\n'.join(sorted(versions_needed)))
 " > "$PATH_DIR/need_versions.txt"
 
 for version in $(cat "$PATH_DIR/need_versions.txt"); do
-    if [[ -f "dde-launcher_${version}_amd64.deb" ]] && [[ -s "dde-launcher_${version}_amd64.deb" ]]; then
+    # 根据 ARCH 参数确定文件名中的架构后缀
+    local arch_suffix
+    case "$ARCH" in
+        x86) arch_suffix="i386" ;;
+        x86_64) arch_suffix="amd64" ;;
+        arm64) arch_suffix="arm64" ;;
+        *) arch_suffix="$ARCH" ;;
+    esac
+    
+    if [[ -f "dde-launcher_${version}_${arch_suffix}.deb" ]] && [[ -s "dde-launcher_${version}_${arch_suffix}.deb" ]]; then
         continue
     fi
     echo -n "下载 dde-launcher=$version ... "
@@ -139,10 +148,10 @@ while IFS=: read -r VERSION CRASH_COUNT UNIQUE; do
     # 5.2 安装包
     echo -e "${CYAN}  [5.2] 安装包${NC}"
     cd "$PKG_DIR"
-    if [[ -f "dde-launcher_${VERSION}_amd64.deb" ]]; then
-        echo "$SUDO_PASSWORD" | sudo -S dpkg -i "dde-launcher_${VERSION}_amd64.deb" 2>/dev/null || true
-        if [[ -f "dde-launcher-dbgsym_${VERSION}_amd64.deb" ]]; then
-            echo "$SUDO_PASSWORD" | sudo -S dpkg -i "dde-launcher-dbgsym_${VERSION}_amd64.deb" 2>/dev/null || true
+    if [[ -f "dde-launcher_${VERSION}_${arch_suffix}.deb" ]]; then
+        echo "$SUDO_PASSWORD" | sudo -S dpkg -i "dde-launcher_${VERSION}_${arch_suffix}.deb" 2>/dev/null || true
+        if [[ -f "dde-launcher-dbgsym_${VERSION}_${arch_suffix}.deb" ]]; then
+            echo "$SUDO_PASSWORD" | sudo -S dpkg -i "dde-launcher-dbgsym_${VERSION}_${arch_suffix}.deb" 2>/dev/null || true
         fi
     fi
 

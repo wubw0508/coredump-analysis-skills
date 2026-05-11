@@ -28,7 +28,7 @@ PACKAGE="${PACKAGE:-}"
 START_DATE="${START_DATE:-}"
 END_DATE="${END_DATE:-}"
 SYS_VERSION="${SYS_VERSION:-1070-1075}"
-ARCH="${ARCH:-x86}"
+ARCH="${ARCH:-amd64}"  # 默认使用 amd64 架构
 SELECTED_VERSIONS="${SELECTED_VERSIONS:-}"
 WORKSPACE="${WORKSPACE:-}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-180}"  # 进度上报间隔（秒），0表示禁用
@@ -55,6 +55,34 @@ init_status_files() {
     if [[ ! -f "$VERSION_STATUS_FILE" ]]; then
         printf "#timestamp\tpackage\tversion\tstep\tstatus\tmessage\n" > "$VERSION_STATUS_FILE"
     fi
+}
+
+# 架构验证和默认值处理
+validate_architecture() {
+    # 如果 ARCH 为空或无效，默认使用 amd64
+    if [[ -z "$ARCH" || "$ARCH" == "none" ]]; then
+        echo -e "${YELLOW}⚠️ 未指定架构参数，默认使用 amd64${NC}"
+        ARCH="amd64"
+    fi
+    
+    # 验证架构是否支持
+    case "$ARCH" in
+        x86|x86_64|amd64|i386)
+            # 架构有效
+            ;;
+        arm)
+            # arm 架构映射到 aarch64
+            ARCH="aarch64"
+            ;;
+        arm64)
+            # arm64 架构映射到 aarch64
+            ARCH="aarch64"
+            ;;
+        *)
+            echo -e "${YELLOW}⚠️ 不支持的架构: $ARCH，默认使用 amd64${NC}"
+            ARCH="amd64"
+            ;;
+    esac
 }
 
 set_step_result() {
@@ -101,6 +129,11 @@ version_selected() {
 # 检查配置完整性
 check_config() {
     echo -e "${BLUE}检查配置完整性...${NC}"
+    
+    # 架构验证
+    validate_architecture
+    echo -e "${BLUE}使用架构: $ARCH${NC}"
+    
     if [[ ! -f "$LOAD_ACCOUNTS_SCRIPT" ]]; then
         echo -e "${RED}错误: 账号加载脚本不存在: $LOAD_ACCOUNTS_SCRIPT${NC}"
         return 1
@@ -348,8 +381,17 @@ download_data() {
     echo -e "${YELLOW}执行: ${cmd[*]}${NC}" >&2
     "${cmd[@]}" >&2
 
+    # 根据 ARCH 参数确定CSV文件名中的架构后缀
+    local csv_arch_suffix
+    case "$ARCH" in
+        x86) csv_arch_suffix="X86" ;;
+        x86_64) csv_arch_suffix="X86" ;;
+        arm|arm64|aarch64) csv_arch_suffix="AARCH64" ;;  # arm/arm64/aarch64 都使用 AARCH64 文件名后缀
+        *) csv_arch_suffix="$ARCH" ;;
+    esac
+
     # 查找下载的文件（使用搜索包名）
-    local csv_file=$(find "$WORKSPACE/1.数据下载" -name "${search_package}_X86_crash_*.csv" -type f | sort | tail -1)
+    local csv_file=$(find "$WORKSPACE/1.数据下载" -name "${search_package}_${csv_arch_suffix}_crash_*.csv" -type f | sort | tail -1)
 
     if [[ -z "$csv_file" ]]; then
         echo -e "${RED}错误: 数据下载失败，未找到CSV文件${NC}" >&2
@@ -527,15 +569,16 @@ download_packages_for_version() {
     # 下载该版本的包和调试符号（使用位置参数格式）
     echo -e "${YELLOW}下载 $package ${clean_version} ...${NC}"
 
-    # 调用下载脚本（忽略其退出码）
+    # 调用下载脚本（忽略其退出码），传入架构参数
     python3 "$dl_script" \
         -d "$dl_dir" \
+        --arch "$ARCH" \
         "$package" "$clean_version" 2>&1 || true
 
     # 使用 find 检查文件是否存在，允许 Debian 构建后缀：
-    #   pkg_1.2.3_amd64.deb / pkg_1.2.3-1_amd64.deb
-    #   pkg_1.2.3+build_amd64.deb / pkg_1.2.3.1-1_amd64.deb
-    if [[ -d "$dl_dir" ]] && [[ -n "$(find_deb_files_for_version "$dl_dir" "$package" "$clean_version")" ]]; then
+    #   pkg_1.2.3_arm64.deb / pkg_1.2.3-1_arm64.deb
+    #   pkg_1.2.3+build_arm64.deb / pkg_1.2.3.1-1_arm64.deb
+    if [[ -d "$dl_dir" ]] && [[ -n "$(find_deb_files_for_version "$dl_dir" "$package" "$clean_version" "$ARCH")" ]]; then
         echo -e "${GREEN}✅ 包下载完成${NC}"
         set_step_result "ok" "deb packages downloaded"
         return 0
@@ -559,14 +602,26 @@ find_deb_files_for_version() {
     local dl_dir="$1"
     local package="$2"
     local version="$3"
+    local arch="$4"
+
+    # 根据 ARCH 参数确定文件名中的架构后缀
+    local arch_suffix
+    case "$arch" in
+        x86) arch_suffix="i386" ;;
+        x86_64) arch_suffix="amd64" ;;
+        arm64) arch_suffix="arm64" ;;
+        aarch64) arch_suffix="arm64" ;;  # aarch64 对应 deb 包的 arm64
+        *) arch_suffix="$arch" ;;
+    esac
 
     find "$dl_dir" -maxdepth 1 -type f \( \
-        -name "${package}_${version}_*.deb" -o \
-        -name "${package}_${version}-*.deb" -o \
+        -name "${package}_${version}_${arch_suffix}.deb" -o \
+        -name "${package}-${arch_suffix}_${version}_${arch_suffix}.deb" -o \
+        -name "${package}_${version}-${arch_suffix}.deb" -o \
         -name "${package}_${version}+*.deb" -o \
         -name "${package}_${version}.*.deb" -o \
-        -name "${package}-dbgsym_${version}_*.deb" -o \
-        -name "${package}-dbgsym_${version}-*.deb" -o \
+        -name "${package}-dbgsym_${version}_${arch_suffix}.deb" -o \
+        -name "${package}-dbgsym_${version}-${arch_suffix}.deb" -o \
         -name "${package}-dbgsym_${version}+*.deb" -o \
         -name "${package}-dbgsym_${version}.*.deb" \
     \) 2>/dev/null | sort
@@ -617,7 +672,7 @@ analyze_crashes_for_version() {
         # 安装该版本的 deb 包（包括调试符号包 dbgsym）
         # 使用 find 避免 ls 在多文件时返回1的问题
         if [[ -d "$dl_dir" ]]; then
-            local deb_files=$(find_deb_files_for_version "$dl_dir" "$package" "$clean_version" || true)
+            local deb_files=$(find_deb_files_for_version "$dl_dir" "$package" "$clean_version" "$ARCH" || true)
             if [[ -n "$deb_files" ]]; then
                 local can_install=false
                 local use_expect=false

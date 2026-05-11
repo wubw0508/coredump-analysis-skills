@@ -176,13 +176,28 @@ step1_download_data() {
     [[ -n "$END_DATE" ]] && cmd="$cmd --end-date $END_DATE"
     cmd="$cmd --sys-version $SYS_VERSION"
     cmd="$cmd --output-dir $download_subdir"
-    cmd="$cmd $PACKAGE x86 crash"
+    # 使用 ARCH 参数或默认 amd64
+    local download_arch="${ARCH:-amd64}"
+    # 如果指定了 arm64，下载时使用 aarch64
+    if [[ "$download_arch" == "arm64" ]]; then
+        download_arch="aarch64"
+    fi
+    cmd="$cmd $PACKAGE $download_arch crash"
 
     echo -e "${YELLOW}执行: $cmd${NC}"
     echo ""
 
     if eval "$cmd"; then
-        local csv_file=$(find "$download_subdir" -name "${PACKAGE}_X86_crash_*.csv" -o -name "${PACKAGE}_X86_64_crash_*.csv" 2>/dev/null | head -1)
+        # 根据 ARCH 参数确定CSV文件名中的架构后缀
+    local csv_arch_suffix
+    case "$ARCH" in
+        x86) csv_arch_suffix="X86" ;;
+        x86_64) csv_arch_suffix="X86" ;;
+        arm|arm64|aarch64) csv_arch_suffix="AARCH64" ;;  # arm/arm64/aarch64 都使用 AARCH64 文件名后缀
+        *) csv_arch_suffix="$ARCH" ;;
+    esac
+
+    local csv_file=$(find "$download_subdir" -name "${PACKAGE}_${csv_arch_suffix}_crash_*.csv" -o -name "${PACKAGE}_X86_crash_*.csv" -o -name "${PACKAGE}_X86_64_crash_*.csv" 2>/dev/null | head -1)
 
         if [[ -z "$csv_file" ]]; then
             echo -e "${RED}错误: 数据下载失败${NC}"

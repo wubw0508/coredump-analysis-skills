@@ -28,7 +28,7 @@ SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
 PACKAGES_FILE="$SKILLS_DIR/packages.txt"
 LOAD_ACCOUNTS_SCRIPT="$SKILLS_DIR/coredump-full-analysis/scripts/load_accounts.sh"
 
-ARCH="x86"
+ARCH="amd64"  # 默认使用 amd64 架构
 WORKSPACE=""
 RUN_BACKGROUND=false
 PROGRESS_INTERVAL=0  # 0表示禁用进度监控，非0表示启用(秒)
@@ -64,7 +64,7 @@ ${GREEN}可选参数:${NC}
                            例如: 2026-04-14
     --sys-version <ver>   系统版本范围 (默认: 1070-1075)
                            例如: 1070, 1070-1075, 1070-1075
-    --arch <arch>        架构 (默认: x86)
+    --arch <arch>        架构 (默认: amd64)
                            例如: x86, x86_64, arm64
     --workspace <dir>      工作目录 (默认: ~/coredump-workspace-YYYYMMDD-HHMMSS)
     --background          后台运行

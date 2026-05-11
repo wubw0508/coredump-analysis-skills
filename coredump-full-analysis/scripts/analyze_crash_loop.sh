@@ -222,14 +222,30 @@ phase1_prepare() {
     [[ -n "$START_DATE" ]] && cmd="$cmd --start-date $START_DATE"
     [[ -n "$END_DATE" ]] && cmd="$cmd --end-date $END_DATE"
     [[ -n "$SYS_VERSION" ]] && cmd="$cmd --sys-version $SYS_VERSION"
-    cmd="$cmd $PACKAGE x86_64 crash"
+    # 根据 ARCH 参数确定架构
+    local download_arch
+    case "$ARCH" in
+        x86) download_arch="x86" ;;
+        x86_64) download_arch="x86_64" ;;
+        arm|arm64) download_arch="aarch64" ;;  # arm/arm64 映射到 aarch64 下载
+        *) download_arch="$ARCH" ;;
+    esac
+    cmd="$cmd $PACKAGE $download_arch crash"
 
     echo -e "${YELLOW}    执行: $cmd${NC}"
     eval "$cmd"
 
     # 获取绝对路径
     local workspace_abs=$(cd "$WORKSPACE" 2>/dev/null || cd "$(pwd)/$WORKSPACE" && pwd)
-    local csv_file=$(find "$workspace_abs" -path "*/1.数据下载/*" -name "${PACKAGE}_X86_64_crash_*.csv" -type f 2>/dev/null | sort | tail -1)
+    # 根据 ARCH 参数确定CSV文件名中的架构后缀
+    local csv_arch_suffix
+    case "$download_arch" in
+        x86) csv_arch_suffix="X86" ;;
+        x86_64) csv_arch_suffix="X86" ;;
+        arm|arm64|aarch64) csv_arch_suffix="AARCH64" ;;  # arm/arm64/aarch64 都使用 AARCH64 文件名后缀
+        *) csv_arch_suffix="$download_arch" ;;
+    esac
+    local csv_file=$(find "$workspace_abs" -path "*/1.数据下载/*" -name "${PACKAGE}_${csv_arch_suffix}_crash_*.csv" -o -name "${PACKAGE}_X86_64_crash_*.csv" -type f 2>/dev/null | sort | tail -1)
     if [[ -z "$csv_file" ]]; then
         echo -e "${RED}    错误: 数据下载失败，未找到CSV文件${NC}"
         exit 1

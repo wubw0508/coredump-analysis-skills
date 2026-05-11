@@ -1,3 +1,8 @@
+---
+name: coredump-analysis-skills
+description: DDE/UOS 崩溃数据分析工具集，提供从数据下载、筛选去重、源码管理、包管理到崩溃分析的完整流程。
+---
+
 # coredump-analysis-skills
 
 DDE/UOS 崩溃数据分析工具集，提供从数据下载、筛选去重、源码管理、包管理到崩溃分析的完整流程。
