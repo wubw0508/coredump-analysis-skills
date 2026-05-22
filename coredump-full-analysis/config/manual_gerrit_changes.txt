@@ -1,0 +1,33 @@
+# 手工补充到 Gerrit Web Report 的 change 链接
+# 每行一个 URL，生成报告时会自动去重并尝试补全详情
+
+https://gerrit.uniontech.com/c/dde-session-shell/+/340460
+https://gerrit.uniontech.com/c/dde-session-shell/+/340462
+https://gerrit.uniontech.com/c/dde-session-shell/+/340464
+https://gerrit.uniontech.com/c/dde-session-shell/+/340467
+https://gerrit.uniontech.com/c/dde-session-shell/+/340496
+https://gerrit.uniontech.com/c/dde-session-shell/+/340499
+https://gerrit.uniontech.com/c/dde-session-shell/+/340500
+https://gerrit.uniontech.com/c/dde-session-shell/+/340515
+https://gerrit.uniontech.com/c/dde-session-shell/+/340518
+https://gerrit.uniontech.com/c/dde-session-shell/+/340517
+https://gerrit.uniontech.com/c/dde-session-shell/+/340578
+https://gerrit.uniontech.com/c/dde-session-shell/+/340579
+
+https://gerrit.uniontech.com/c/dde-launcher/+/340716
+https://gerrit.uniontech.com/c/dde-launcher/+/340674
+https://gerrit.uniontech.com/c/dde-launcher/+/340639
+https://gerrit.uniontech.com/c/dde-launcher/+/340514
+https://gerrit.uniontech.com/c/dde-launcher/+/340865
+
+https://gerrit.uniontech.com/c/qt5platform-plugins/+/340809
+https://gerrit.uniontech.com/c/qt5platform-plugins/+/340433
+https://gerrit.uniontech.com/c/qt5platform-plugins/+/340434
+
+https://gerrit.uniontech.com/c/dde-clipboard/+/340666
+https://gerrit.uniontech.com/c/dde-clipboard/+/340665
+
+https://gerrit.uniontech.com/c/deepin-update-ui/+/340577
+https://gerrit.uniontech.com/c/deepin-face/+/340586
+https://gerrit.uniontech.com/c/dde-dock/+/340629
+https://gerrit.uniontech.com/c/dde-control-center/+/340671

@@ -192,6 +192,28 @@ python3 coredump-full-analysis/scripts/generate_gerrit_web_report.py \
   --no-gerrit-enrich
 ```
 
+补充手工 Gerrit 变更：
+
+```bash
+# 默认会自动读取 coredump-full-analysis/config/manual_gerrit_changes.txt
+python3 coredump-full-analysis/scripts/generate_gerrit_web_report.py \
+  --workspace /path/to/coredump-workspace
+
+# 也可以额外指定一个或多个清单文件
+python3 coredump-full-analysis/scripts/generate_gerrit_web_report.py \
+  --workspace /path/to/coredump-workspace \
+  --manual-change-file /path/to/manual_changes.txt \
+  --manual-change-url https://gerrit.uniontech.com/c/dde-dock/+/340629
+```
+
+手工清单文件格式：
+
+```text
+# 每行一个 Gerrit change 链接，空行和 # 注释会被忽略
+https://gerrit.uniontech.com/c/dde-session-shell/+/340460
+https://gerrit.uniontech.com/c/dde-launcher/+/340716
+```
+
 生成后启动本地服务：
 
 ```bash
