@@ -5,7 +5,7 @@
 
 set -e
 
-SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
+SKILLS_DIR="${SKILLS_DIR:-$SCRIPT_DIR}"
 SCRIPTS_DIR="$SKILLS_DIR/coredump-full-analysis/scripts"
 TARGET_BRANCH="origin/develop/eagle"
 DRY_RUN=false

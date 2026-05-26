@@ -17,7 +17,7 @@ NC='\033[0m'
 # 脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$SCRIPT_DIR/../config"
-SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
+SKILLS_DIR="${SKILLS_DIR:-$SCRIPT_DIR/../..}"
 LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
 
 # 工作目录优先级：--workspace > WORKSPACE 环境变量 > 账户配置根目录/home

@@ -16,7 +16,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Skills目录
-SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
+SKILLS_DIR="${SKILLS_DIR:-$SCRIPT_DIR/../..}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
@@ -200,7 +200,7 @@ setup_workspace() {
 phase1_prepare() {
     print_phase "1" "准备工作（一次性执行）"
 
-    local skills_dir="/home/wubw/.nvm/versions/node/v24.14.1/lib/node_modules/openclaw/skills"
+    local skills_dir="$SKILLS_DIR"
 
     # 1.1 下载数据
     print_step "1.1" "下载崩溃数据..."

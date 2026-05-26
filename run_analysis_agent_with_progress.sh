@@ -196,7 +196,7 @@ echo -e "${YELLOW}启动崩溃分析...${NC}"
 
 # 启动后台进程
 (
-    cd "$HOME/.openclaw/skills/coredump-analysis-skills/coredump-full-analysis/scripts"
+    cd "$SKILLS_DIR/coredump-full-analysis/scripts"
     cmd=(bash analyze_crash_complete.sh
         --package "$PACKAGE"
         --arch "$ARCH"

@@ -14,7 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Skills目录（脚本所在目录的父目录）
-SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
+SKILLS_DIR="${SKILLS_DIR:-$SCRIPT_DIR/../..}"
 
 # 脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -164,7 +164,7 @@ ${GREEN}首次使用:${NC}
 
 ${GREEN}账号配置方式:${NC}
     唯一入口: 仓库根目录 accounts.json
-           ~/.openclaw/skills/coredump-analysis-skills/accounts.json
+           \$SKILLS_DIR/accounts.json
 
 ${GREEN}选项:${NC}
     --packages <name>      包名（必需，文档推荐写法）
@@ -394,6 +394,14 @@ download_data() {
     local csv_file=$(find "$WORKSPACE/1.数据下载" -name "${search_package}_${csv_arch_suffix}_crash_*.csv" -type f | sort | tail -1)
 
     if [[ -z "$csv_file" ]]; then
+        # 下载失败，尝试使用旧的CSV文件
+        local old_csv=$(find "$WORKSPACE/1.数据下载" -name "${search_package}_${csv_arch_suffix}_crash_*.csv" -type f 2>/dev/null | sort | tail -1)
+        if [[ -n "$old_csv" ]]; then
+            local old_lines=$(wc -l < "$old_csv")
+            echo -e "${YELLOW}⚠️ 本次下载未产生新数据，回退使用旧文件: $old_csv ($old_lines 行)${NC}" >&2
+            printf "%s" "$old_csv"
+            return 0
+        fi
         echo -e "${RED}错误: 数据下载失败，未找到CSV文件${NC}" >&2
         exit 1
     fi
@@ -524,6 +532,17 @@ download_source_for_version() {
 
     echo -e "${YELLOW}━━━ 步骤3: 切换代码到 $version ━━━${NC}"
 
+    # 检查本地是否已有该版本的源码
+    local repo_dir="$WORKSPACE/3.代码管理/$package"
+    if [[ -d "$repo_dir/.git" ]]; then
+        local current_tag=$(git -C "$repo_dir" describe --tags --exact-match 2>/dev/null || true)
+        if [[ "$current_tag" == "$version" ]]; then
+            echo -e "${GREEN}✅ 源码已存在且版本匹配 ($version)，跳过切换${NC}"
+            set_step_result "ok" "source already at correct version"
+            return 0
+        fi
+    fi
+
     # 设置环境变量并执行脚本
     if COREDUMP_WORKSPACE="$WORKSPACE" GERRIT_USER="$GERRIT_USER" GERRIT_HOST="${GERRIT_HOST:-gerrit.uniontech.com}" GERRIT_PORT="${GERRIT_PORT:-29418}" \
        bash "$source_script" "$package" "$version" >&2; then
@@ -563,6 +582,13 @@ download_packages_for_version() {
     if ! can_install_deb_packages; then
         echo -e "${YELLOW}⚠️ 未配置 sudo 密码且当前用户无免密 sudo，跳过 deb/dbgsym 下载${NC}"
         set_step_result "skipped_no_sudo" "no sudo capability, skip package download"
+        return 0
+    fi
+
+    # 检查本地是否已有该版本的deb包
+    if [[ -n "$(find_deb_files_for_version "$dl_dir" "$package" "$clean_version" "$ARCH")" ]]; then
+        echo -e "${GREEN}✅ $package $clean_version 的deb包已存在，跳过下载${NC}"
+        set_step_result "ok" "deb packages already exist"
         return 0
     fi
 
@@ -755,6 +781,10 @@ expect {
     fi
 
     # 执行分析（使用 analyze_crash_per_version.py 保存 JSON 报告）
+    # 将脚本目录加入 PYTHONPATH，确保 enhanced_analysis 等模块可导入
+    local analyze_script_dir
+    analyze_script_dir="$(cd "$(dirname "$analyze_script")" && pwd)"
+    PYTHONPATH="$analyze_script_dir:${PYTHONPATH:-}" \
     python3 "$analyze_script" \
         --package "$package" \
         --version "$clean_version" \
@@ -856,6 +886,7 @@ analyze_crashes() {
     echo ""
 
     cd "$WORKSPACE/5.崩溃分析"
+    PYTHONPATH="$analyze_script_dir:${PYTHONPATH:-}" \
     python3 "$analyze_script" \
         --workspace "$WORKSPACE" \
         --package "$PACKAGE" \

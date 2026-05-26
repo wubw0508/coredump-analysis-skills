@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
+SKILLS_DIR="${SKILLS_DIR:-$SCRIPT_DIR/../..}"
 
 DEFAULT_WORKSPACE="$HOME/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
 DEFAULT_PACKAGE=""
@@ -238,7 +238,7 @@ script_dir = sys.path[0] if sys.path[0] else '.'
 workspace = script_dir.replace('/2.数据筛选', '')
 
 # 读取原始脚本
-with open('/home/wubw/.nvm/versions/node/v24.14.1/lib/node_modules/openclaw/skills/coredump-data-filter/scripts/filter_crash_data.py', 'r') as f:
+with open('$SKILLS_DIR/coredump-data-filter/scripts/filter_crash_data.py', 'r') as f:
     content = f.read()
 
 # 替换 WORKSPACE 路径

@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-SKILLS_DIR="${SKILLS_DIR:-$HOME/.openclaw/skills/coredump-analysis-skills}"
+SKILLS_DIR="${SKILLS_DIR:-$SCRIPT_DIR}"
 PACKAGES_FILE="$SKILLS_DIR/packages.txt"
 LOG_DIR="$HOME/coredump-auto-analysis-logs"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
