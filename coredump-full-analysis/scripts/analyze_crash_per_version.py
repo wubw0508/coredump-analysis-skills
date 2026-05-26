@@ -15,6 +15,16 @@ from datetime import datetime
 
 from package_rules import get_package_patterns
 
+# Import enhanced analysis module
+try:
+    from enhanced_analysis import (
+        EnhancedAnalyzer, run_enhanced_analysis_for_version,
+        parse_frame_addresses, compute_offsets,
+    )
+    HAS_ENHANCED = True
+except ImportError:
+    HAS_ENHANCED = False
+
 
 def parse_args():
     """解析命令行参数"""
@@ -419,10 +429,51 @@ def analyze_version(package: str, version: str, workspace: str, max_crashes: int
     # 限制分析的崩溃数量
     analyzed_crashes = crashes if max_crashes <= 0 else crashes[:max_crashes]
 
-    # 统计
-    total_fixable = sum(1 for c in analyzed_crashes if c['fixable'] is True)
-    total_non_fixable = sum(1 for c in analyzed_crashes if c['fixable'] is False)
-    total_uncertain = sum(1 for c in analyzed_crashes if c['fixable'] == 'uncertain')
+    # ═══════════════════════════════════════════════════════════════════
+    # 增强分析: addr2line + objdump + git blame + LLM + debuginfod
+    # ═══════════════════════════════════════════════════════════════════
+    enhanced_stats = {}
+    if HAS_ENHANCED:
+        print(f"🔧 运行增强分析 (addr2line / objdump / git blame / LLM / debuginfod) ...")
+        enhanced_results, enhanced_stats = run_enhanced_analysis_for_version(
+            analyzed_crashes, workspace, package, version_clean
+        )
+        # Attach enhanced results to each crash
+        for crash, enhanced in zip(analyzed_crashes, enhanced_results):
+            crash['enhanced'] = enhanced
+
+            # Use enhanced data to improve fixability assessment
+            improvement = enhanced.get('improved_fixability', {})
+            if improvement.get('resolved'):
+                # If addr2line resolved source, upgrade confidence
+                if crash.get('fix_confidence') == 'low' and crash.get('fixable') == 'uncertain':
+                    detected_type = improvement.get('detected_crash_type')
+                    if detected_type:
+                        type_map = {
+                            'null_deref': ('空指针解引用', '添加空指针检查', 'if (ptr) { ptr->method(); }'),
+                            'use_after_free': ('释放后使用', '使用智能指针或置NULL', 'delete ptr; ptr = nullptr;'),
+                            'buffer_overflow': ('缓冲区溢出', '添加边界检查', 'if (index < size) { array[index] = value; }'),
+                        }
+                        if detected_type in type_map:
+                            reason, fix_type, fix_code = type_map[detected_type]
+                            crash['fixable'] = True
+                            crash['fix_reason'] = reason
+                            crash['fix_type'] = fix_type
+                            crash['fix_code'] = fix_code
+                            crash['fix_confidence'] = 'medium'
+                            crash['pattern_name'] = f'enhanced_{detected_type}'
+
+                # LLM suggestion override
+                llm_fix = improvement.get('llm_suggested_fix')
+                llm_conf = improvement.get('llm_confidence')
+                if llm_fix and llm_conf in ('high', 'medium'):
+                    crash['llm_suggested_fix'] = llm_fix
+                    crash['llm_confidence'] = llm_conf
+
+        # Recount after improvements
+        total_fixable = sum(1 for c in analyzed_crashes if c['fixable'] is True)
+        total_non_fixable = sum(1 for c in analyzed_crashes if c['fixable'] is False)
+        total_uncertain = sum(1 for c in analyzed_crashes if c['fixable'] == 'uncertain')
 
     # 按信号类型统计
     signal_counts = {}
@@ -456,7 +507,8 @@ def analyze_version(package: str, version: str, workspace: str, max_crashes: int
         'by_signal': signal_counts,
         'by_symbol': symbol_counts,
         'crashes': analyzed_crashes,
-        'recommendations': []
+        'recommendations': [],
+        'enhanced_stats': enhanced_stats if HAS_ENHANCED else {},
     }
 
     # 生成总体建议
@@ -488,6 +540,18 @@ def save_markdown_report(analysis: Dict, output_file: Path):
         f.write(f"- 不可修复崩溃: {analysis['summary']['non_fixable_count']}\n")
         f.write(f"- 需人工判断: {analysis['summary']['uncertain_count']}\n")
         f.write(f"- 修复率: {analysis['summary']['fix_rate']}\n\n")
+
+        # 增强分析统计
+        estats = analysis.get('enhanced_stats', {})
+        if estats:
+            f.write("**增强分析**:\n")
+            f.write(f"- addr2line 完全解析: {estats.get('addr2line_resolved', 0)}\n")
+            f.write(f"- addr2line 部分解析(函数名): {estats.get('addr2line_partial', 0)}\n")
+            f.write(f"- 源码上下文获取: {estats.get('source_found', 0)}\n")
+            f.write(f"- Git Blame/Log: {estats.get('git_available', 0)}\n")
+            f.write(f"- objdump 反汇编: {estats.get('objdump_available', 0)}\n")
+            f.write(f"- LLM 分析: {estats.get('llm_analyzed', 0)}\n")
+            f.write(f"- 可修复性提升: {estats.get('fixability_improved', 0)}\n\n")
 
         # 按信号类型统计
         f.write("## 按信号类型统计\n\n")
@@ -545,6 +609,80 @@ def save_markdown_report(analysis: Dict, output_file: Path):
                     f.write(f"{cmd}\n")
                 f.write("```\n")
 
+            # ═══ Enhanced analysis results ═══
+            enhanced = crash.get('enhanced', {})
+            if enhanced and not enhanced.get('error'):
+                # addr2line resolved frames
+                a2l_results = enhanced.get('addr2line', [])
+                resolved = [r for r in a2l_results if r.get('status') == 'ok']
+                partial = [r for r in a2l_results if r.get('status') in ('partial', 'partial_with_source')]
+                if resolved or partial:
+                    total = len(a2l_results)
+                    f.write(f"\n**addr2line 解析** (完全解析 {len(resolved)}/{total}, 部分解析 {len(partial)}/{total}):\n")
+                    for r in resolved[:8]:
+                        func = r.get('function') or '?'
+                        fpath = r.get('file') or '?'
+                        fline = r.get('line') or '?'
+                        lib = r.get('library') or '?'
+                        f.write(f"  - `{func}` at {fpath}:{fline} [{lib}]\n")
+                    for r in partial[:8]:
+                        func = r.get('function') or '?'
+                        src = r.get('source_file', '')
+                        lib = r.get('library') or '?'
+                        extra = f" → 源码: {src}" if src else ""
+                        f.write(f"  - ~`{func}` [{lib}]{extra}\n")
+
+                # Source context
+                src_ctxs = enhanced.get('source_context', [])
+                for ctx in src_ctxs[:2]:
+                    if ctx.get('available'):
+                        f.write(f"\n**源码上下文**: `{ctx.get('display_file', '?')}:{ctx.get('line', '?')}`\n")
+                        f.write("```cpp\n")
+                        for cl in ctx.get('context', []):
+                            marker = '>>>' if cl.get('is_crash_line') else '   '
+                            f.write(f"{marker} {cl['line_num']:>4}: {cl['content']}\n")
+                        f.write("```\n")
+
+                # objdump disassembly
+                objdump_r = enhanced.get('objdump')
+                if objdump_r and objdump_r.get('available'):
+                    f.write(f"\n**反汇编** (offset {objdump_r['offset']} in {objdump_r['library']}):\n")
+                    f.write("```asm\n")
+                    for line in (objdump_r.get('instructions') or [])[:25]:
+                        f.write(f"{line}\n")
+                    f.write("```\n")
+
+                # git blame / log
+                git_results = enhanced.get('git_analysis', [])
+                for gr in git_results[:1]:
+                    blame = gr.get('blame', {})
+                    if blame.get('available'):
+                        f.write(f"\n**Git Blame**: `{gr.get('file')}:{gr.get('line')}`\n")
+                        for entry in blame.get('entries', []):
+                            marker = ">>>" if entry.get('is_crash_line') else "   "
+                            f.write(
+                                f"  {marker} {entry.get('commit','?')[:8]} "
+                                f"{entry.get('author','?')} ({entry.get('date','?')}) "
+                                f"L{entry.get('line','?')}: {entry.get('code','')}\n"
+                            )
+                    log = gr.get('log', {})
+                    if log.get('available'):
+                        f.write(f"\n**最近提交**: `{gr.get('file')}`\n")
+                        for c in log.get('commits', [])[:5]:
+                            f.write(f"  - {c.get('hash','?')} {c.get('date','?')} {c.get('author','?')} {c.get('message','')}\n")
+
+                # LLM analysis
+                llm_r = enhanced.get('llm_analysis')
+                if llm_r and llm_r.get('available'):
+                    f.write(f"\n**LLM 崩溃分析** (model: {llm_r.get('model', '?')}):\n")
+                    f.write(f"```\n{llm_r.get('analysis', '')}\n```\n")
+
+                # debuginfod
+                di_r = enhanced.get('debuginfod')
+                if di_r and di_r.get('available'):
+                    f.write(f"\n**debuginfod**: debug symbols found on {di_r.get('server', '?')}\n")
+                    f.write(f"  URL: {di_r.get('url', '?')}\n")
+
             f.write("\n")
 
         # 建议
@@ -595,6 +733,18 @@ def main():
     print(f"不可修复: {analysis['summary']['non_fixable_count']}")
     print(f"修复率: {analysis['summary']['fix_rate']}")
     print()
+
+    # 增强分析统计
+    estats = analysis.get('enhanced_stats', {})
+    if estats:
+        print(f"=== 增强分析 ===")
+        print(f"addr2line: {estats.get('addr2line_resolved', 0)}/{estats.get('total', 0)} resolved")
+        print(f"Source: {estats.get('source_found', 0)} found")
+        print(f"Git: {estats.get('git_available', 0)} analyzed")
+        print(f"Objdump: {estats.get('objdump_available', 0)} disassembled")
+        print(f"LLM: {estats.get('llm_analyzed', 0)} reasoned")
+        print(f"Fixability improved: {estats.get('fixability_improved', 0)}")
+        print()
 
     print(f"=== 文件已保存 ===")
     print(f"JSON: {json_file}")
