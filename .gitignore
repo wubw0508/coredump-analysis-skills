@@ -1,33 +1,14 @@
-# Local tool state
-.claude/
-.codex
-.codex/
-
-# Python cache
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
-# Editor and OS noise
-.DS_Store
-*.swp
-*.swo
-*~
+# Local tool / editor state
+.claude/
 
-# Logs and temp files
+# Runtime artifacts
+coredump-workspace-*/
 *.log
 *.tmp
-path/
-
-# Runtime workspaces and generated analysis outputs
-coredump-workspace-*/
-workspace/
-
-# Common generated artifacts inside the repo
-version_status.tsv
-workspace_manifest.json
-workspace_summary.md
-download.log
-
-# Package downloads and transient analysis files when generated in-tree
-*.deb
-*.ddeb

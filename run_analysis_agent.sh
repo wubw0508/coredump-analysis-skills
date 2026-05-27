@@ -34,6 +34,7 @@ ARCH="amd64"  # 默认使用 amd64 架构
 WORKSPACE=""
 RUN_BACKGROUND=false
 PROGRESS_INTERVAL=0  # 0表示禁用进度监控，非0表示启用(秒)
+DEFAULT_PROGRESS_INTERVAL=180
 AUTO_FIX_SUBMIT=true
 DEFAULT_TARGET_BRANCH="origin/develop/eagle"
 TARGET_BRANCH=""  # 命令行指定时覆盖默认值
@@ -59,6 +60,11 @@ ${BLUE}=========================================================================
 ${GREEN}用法:${NC}
     $0 --packages <包名列表> [选项]
 
+${GREEN}默认行为:${NC}
+    - 不指定 --packages 时：自动从 packages.txt 读取当前启用的 24 个默认项目
+    - --auto-fix-submit 当前默认已开启
+    - --progress 不带数值时，默认使用 ${DEFAULT_PROGRESS_INTERVAL} 秒
+
 ${GREEN}必需参数:${NC}
     --packages <names>     要分析的包名（支持多包，逗号分隔）
                            例如: dde-session-ui
@@ -72,18 +78,18 @@ ${GREEN}可选参数:${NC}
                            例如: 2026-04-14
     --sys-version <ver>   系统版本范围 (默认: 1070-1075)
                            例如: 1070, 1070-1075, 1070-1075
-    --arch <arch>        架构 (默认: amd64)
+    --arch <arch>         架构 (默认: amd64)
                            例如: x86, x86_64, arm64
-    --workspace <dir>      工作目录 (默认: ~/coredump-workspace-YYYYMMDD-HHMMSS)
+    --workspace <dir>     工作目录 (默认: ~/coredump-workspace-YYYYMMDD-HHMMSS)
     --background          后台运行
-    --progress [秒]       启用进度监控 (默认: 180秒)
-    --interval <秒>       进度报告间隔 (默认: 180秒)
+    --progress [秒]       启用进度监控；不带值时默认 ${DEFAULT_PROGRESS_INTERVAL} 秒
+    --interval <秒>       进度报告间隔 (默认: ${DEFAULT_PROGRESS_INTERVAL} 秒)
     --auto-fix-submit     分析后自动检查 target branch 是否已修复，并对已注册 fixer 的模式尝试自动提交
     --target-branch <br>  强制所有包使用同一分支 (覆盖 packages.txt 中的配置)
     --reviewer <email>    自动提交时附加 reviewer，可多次指定
     --no-gerrit-web-report      禁用分析结束后的 Gerrit 网页报告生成
     --serve-gerrit-web-report   分析结束后启动本地服务查看 Gerrit 网页报告
-    --help, -h           显示帮助
+    --help, -h            显示帮助
 
 ${GREEN}分支规则:${NC}
     默认分支: origin/develop/eagle
@@ -143,36 +149,54 @@ ${NC}
 EOF
 }
 
+require_value() {
+    local flag="$1"
+    local value="$2"
+    if [[ -z "$value" || "$value" == --* ]]; then
+        echo -e "${RED}参数 $flag 缺少取值${NC}" >&2
+        exit 1
+    fi
+}
+
+is_integer() {
+    [[ "$1" =~ ^[0-9]+$ ]]
+}
+
 # 解析参数
 while [[ $# -gt 0 ]]; do
     case $1 in
         --package)
-            # 兼容单包参数
+            require_value "$1" "$2"
             PACKAGES="$2"
             shift 2
             ;;
         --packages)
-            # 支持逗号分隔的多包列表
+            require_value "$1" "$2"
             PACKAGES="$2"
             shift 2
             ;;
         --start-date)
+            require_value "$1" "$2"
             START_DATE="$2"
             shift 2
             ;;
         --end-date)
+            require_value "$1" "$2"
             END_DATE="$2"
             shift 2
             ;;
         --sys-version)
+            require_value "$1" "$2"
             SYS_VERSION="$2"
             shift 2
             ;;
         --arch)
+            require_value "$1" "$2"
             ARCH="$2"
             shift 2
             ;;
         --workspace)
+            require_value "$1" "$2"
             WORKSPACE="$2"
             shift 2
             ;;
@@ -181,10 +205,24 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --progress)
-            PROGRESS_INTERVAL="${2:-180}"
-            shift 2
+            if [[ -n "$2" && "$2" != --* ]]; then
+                if ! is_integer "$2"; then
+                    echo -e "${RED}参数 --progress 需要整数秒数: $2${NC}" >&2
+                    exit 1
+                fi
+                PROGRESS_INTERVAL="$2"
+                shift 2
+            else
+                PROGRESS_INTERVAL="$DEFAULT_PROGRESS_INTERVAL"
+                shift
+            fi
             ;;
         --interval)
+            require_value "$1" "$2"
+            if ! is_integer "$2"; then
+                echo -e "${RED}参数 --interval 需要整数秒数: $2${NC}" >&2
+                exit 1
+            fi
             PROGRESS_INTERVAL="$2"
             shift 2
             ;;
@@ -193,10 +231,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --target-branch)
+            require_value "$1" "$2"
             TARGET_BRANCH="$2"
             shift 2
             ;;
         --reviewer)
+            require_value "$1" "$2"
             REVIEWERS+=("$2")
             shift 2
             ;;
