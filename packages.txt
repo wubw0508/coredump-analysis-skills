@@ -1,12 +1,23 @@
 # 全量崩溃分析项目清单
 # 使用说明：
-#   - 全量分析时读取此文件，获取19个默认分析项目列表
+#   - 全量分析时读取此文件，获取默认分析项目列表
 #   - 支持单行注释 (#) 和空行
 #   - 项目之间用换行分隔
-#   - 如果分析命令指定了 --package，则只分析指定项目，忽略此文件
+#   - 如果分析命令指定了 --packages，则只分析指定项目，忽略此文件
+#
+# 格式：[项目名:]包名[,...] [分支名]
+#   - 项目名：可选，Gerrit 仓库路径，默认与第一个包名相同
+#   - 包名：必填，用于搜索崩溃数据（Metabase），支持逗号分隔多个
+#   - 分支名：可选，提交修复的目标分支，默认 develop/eagle
+#
+# 示例：
+#   dde-dock                                        # 项目=包名=dde-dock，分支=develop/eagle
+#   base/lightdm:lightdm uos                        # 项目=base/lightdm，包名=lightdm，分支=uos
+#   go-lib:golang-github-linuxdeepin-go-lib-dev     # 项目=go-lib，包名=golang-github-linuxdeepin-go-lib-dev
+#   dde-network-core:dcc-network-plugin,deepin-service-plugin-network,dock-network-plugin  # 一项目多包
 
 # ============================================================================
-# 项目清单 (共19个)
+# DDE 项目清单 (默认分支: develop/eagle)
 # ============================================================================
 
 dde-control-center
@@ -18,22 +29,22 @@ dde-daemon
 dde-api
 dde-clipboard
 startdde
-go-lib
+go-lib:golang-github-linuxdeepin-go-lib-dev
 dde-polkit-agent
 dde-wloutput
-dde-network-core
+kelvinu/dde-wloutput-daemon:dde-wloutput-daemon
+dde-network-core:dcc-network-plugin,deepin-service-plugin-network,dock-network-plugin
 deepin-face
 dde-wldpms
-deepin-sound-theme
-deepin-authenticate
-deepin-pw-check
+deepin-authentication:deepin-authenticate,libdeepin-authenticate
+deepin-pw-check:deepin-pw-check,libdeepin-pw-check
 deepin-proxy
+deepin-sound-theme
 
 # ============================================================================
-# 上游项目清单 (共5个，暂不处理)
+# 上游项目清单 (自定义分支)
 # ============================================================================
-#base/lightdm
-#base/network-manager
-#base/ipwatchd
-#base/policykit-1
-#base/polkit-qt5-1
+base/lightdm:lightdm uos
+base/network-manager:network-manager uos
+base/ipwatchd:ipwatchd uos
+base/policykit-1:polkitd,libpolkit-gobject-1-0,policykit-1,polkitd-pkla uos

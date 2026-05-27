@@ -35,9 +35,15 @@ WORKSPACE=""
 RUN_BACKGROUND=false
 PROGRESS_INTERVAL=0  # 0表示禁用进度监控，非0表示启用(秒)
 AUTO_FIX_SUBMIT=true
-TARGET_BRANCH="origin/develop/eagle"
+DEFAULT_TARGET_BRANCH="origin/develop/eagle"
+TARGET_BRANCH=""  # 命令行指定时覆盖默认值
 REVIEWERS=()
 SUMMARY_DIR_NAME="6.总结报告"
+
+# 包-分支映射（关联数组）
+declare -A PACKAGE_BRANCH_MAP
+# 包-项目映射（关联数组）：包名 → Gerrit 项目名
+declare -A PACKAGE_PROJECT_MAP
 GENERATE_GERRIT_WEB_REPORT=true
 SERVE_GERRIT_WEB_REPORT=false
 PACKAGE_STATUS_FILE=""
@@ -73,11 +79,22 @@ ${GREEN}可选参数:${NC}
     --progress [秒]       启用进度监控 (默认: 180秒)
     --interval <秒>       进度报告间隔 (默认: 180秒)
     --auto-fix-submit     分析后自动检查 target branch 是否已修复，并对已注册 fixer 的模式尝试自动提交
-    --target-branch <br>  自动修复提交目标分支 (默认: origin/develop/eagle)
+    --target-branch <br>  强制所有包使用同一分支 (覆盖 packages.txt 中的配置)
     --reviewer <email>    自动提交时附加 reviewer，可多次指定
     --no-gerrit-web-report      禁用分析结束后的 Gerrit 网页报告生成
     --serve-gerrit-web-report   分析结束后启动本地服务查看 Gerrit 网页报告
     --help, -h           显示帮助
+
+${GREEN}分支规则:${NC}
+    默认分支: origin/develop/eagle
+    packages.txt 格式: [项目名:]包名[,...] [分支名]
+    --target-branch 可强制覆盖所有包的分支
+
+${GREEN}packages.txt 示例:${NC}
+    dde-dock                                        # 项目=包名，分支=develop/eagle
+    go-lib:golang-github-linuxdeepin-go-lib-dev     # 项目=go-lib，包名=golang-github-linuxdeepin-go-lib-dev
+    base/lightdm:lightdm uos                        # 项目=base/lightdm，包名=lightdm，分支=uos
+    dde-network-core:dcc-network-plugin,deepin-service-plugin-network,dock-network-plugin  # 一项目多包
 
 ${GREEN}示例:${NC}
     # 全量分析（读取 packages.txt，分析全部24个默认项目）
@@ -203,17 +220,102 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# 解析 packages.txt 并填充包-分支映射
+# 格式: [项目名:]包名[,...] [分支名]
+parse_packages_file() {
+    local file="$1"
+    local packages=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # 跳过注释和空行
+        line=$(echo "$line" | sed 's/#.*//' | xargs)
+        [[ -z "$line" ]] && continue
+
+        # 解析分支名（最后一个字段，如果不像包名则为分支）
+        local branch=""
+        local main_part="$line"
+        local last_field=$(echo "$line" | awk '{print $NF}')
+        # 如果最后一个字段不含 / 和 , 和 :，可能是分支名
+        if [[ "$last_field" != *"/"* && "$last_field" != *","* && "$last_field" != *":"* ]]; then
+            # 检查是否是分支名（不是单个包名的情况）
+            local fields_count=$(echo "$line" | awk '{print NF}')
+            if [[ $fields_count -gt 1 ]]; then
+                branch="$last_field"
+                main_part=$(echo "$line" | awk '{for(i=1;i<NF;i++) printf $i" "; print ""}' | xargs)
+            fi
+        fi
+
+        # 解析 [项目名:]包名[,...]
+        local project=""
+        local pkg_list=""
+        if [[ "$main_part" == *":"* ]]; then
+            # 格式: 项目名:包名1,包名2
+            project=$(echo "$main_part" | cut -d':' -f1)
+            pkg_list=$(echo "$main_part" | cut -d':' -f2)
+        else
+            # 格式: 包名（项目名=包名）
+            pkg_list="$main_part"
+        fi
+
+        # 设置映射
+        local default_branch="${branch:-develop/eagle}"
+        IFS=',' read -ra PKGS <<< "$pkg_list"
+        for pkg in "${PKGS[@]}"; do
+            pkg=$(echo "$pkg" | xargs)  # trim
+            [[ -z "$pkg" ]] && continue
+
+            # 设置项目映射
+            if [[ -n "$project" ]]; then
+                PACKAGE_PROJECT_MAP["$pkg"]="$project"
+            else
+                PACKAGE_PROJECT_MAP["$pkg"]="$pkg"
+            fi
+
+            # 设置分支映射
+            PACKAGE_BRANCH_MAP["$pkg"]="origin/$default_branch"
+
+            # 拼接包名
+            if [[ -n "$packages" ]]; then
+                packages="$packages,$pkg"
+            else
+                packages="$pkg"
+            fi
+        done
+    done < "$file"
+    echo "$packages"
+}
+
+# 获取包的分支
+get_package_branch() {
+    local pkg="$1"
+    echo "${PACKAGE_BRANCH_MAP[$pkg]:-origin/$DEFAULT_TARGET_BRANCH}"
+}
+
+# 获取包对应的 Gerrit 项目名
+get_package_project() {
+    local pkg="$1"
+    echo "${PACKAGE_PROJECT_MAP[$pkg]:-$pkg}"
+}
+
 # 验证必需参数
 if [[ -z "$PACKAGES" ]]; then
     # 未指定 --packages，尝试从 packages.txt 读取默认项目列表
     if [[ -f "$PACKAGES_FILE" ]]; then
         echo -e "${YELLOW}未指定 --packages，从 $PACKAGES_FILE 读取默认项目列表${NC}"
-        PACKAGES=$(grep -v '^#' "$PACKAGES_FILE" | grep -v '^$' | tr '\n' ',' | sed 's/,$//')
+        PACKAGES=$(parse_packages_file "$PACKAGES_FILE")
         if [[ -z "$PACKAGES" ]]; then
             echo -e "${RED}错误: packages.txt 为空${NC}"
             exit 1
         fi
-        echo -e "${GREEN}已加载 $(echo "$PACKAGES" | tr ',' '\n' | wc -l) 个分析项目${NC}"
+        local_count=$(echo "$PACKAGES" | tr ',' '\n' | wc -l)
+        echo -e "${GREEN}已加载 ${local_count} 个分析项目${NC}"
+        # 显示自定义分支或项目映射的包
+        for pkg in "${!PACKAGE_BRANCH_MAP[@]}"; do
+            local branch="${PACKAGE_BRANCH_MAP[$pkg]}"
+            local project="${PACKAGE_PROJECT_MAP[$pkg]}"
+            if [[ "$branch" != "origin/$DEFAULT_TARGET_BRANCH" || "$project" != "$pkg" ]]; then
+                echo -e "  ${CYAN}${pkg} → 项目:${project}, 分支:${branch}${NC}"
+            fi
+        done
     else
         echo -e "${RED}错误: 必须指定 --packages 参数，且 packages.txt 不存在${NC}"
         show_help
@@ -224,6 +326,14 @@ fi
 # 转换为数组（支持逗号分隔）
 IFS=',' read -ra PACKAGE_ARRAY <<< "$PACKAGES"
 PACKAGE_COUNT=${#PACKAGE_ARRAY[@]}
+
+# 如果命令行指定了 --target-branch，覆盖所有包的分支
+if [[ -n "$TARGET_BRANCH" ]]; then
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        PACKAGE_BRANCH_MAP["$pkg"]="$TARGET_BRANCH"
+    done
+    DEFAULT_TARGET_BRANCH="$TARGET_BRANCH"
+fi
 
 # 包名处理函数
 # 搜索崩溃时使用不带base/的包名，下载和分析代码时使用带base/的包名
@@ -264,10 +374,32 @@ if [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
     echo "  进度监控: ${PROGRESS_INTERVAL}秒"
 fi
 echo "  自动修复提交: $AUTO_FIX_SUBMIT"
-echo "  自动修复目标分支: $TARGET_BRANCH"
+echo "  默认分支: $DEFAULT_TARGET_BRANCH"
 echo "  Gerrit网页报告: $GENERATE_GERRIT_WEB_REPORT"
 echo "  Gerrit网页服务: $SERVE_GERRIT_WEB_REPORT"
 echo ""
+
+# 显示包-分支映射
+has_custom_mapping=false
+for pkg in "${PACKAGE_ARRAY[@]}"; do
+    local_branch=$(get_package_branch "$pkg")
+    local_project=$(get_package_project "$pkg")
+    if [[ "$local_branch" != "origin/$DEFAULT_TARGET_BRANCH" || "$local_project" != "$pkg" ]]; then
+        has_custom_mapping=true
+        break
+    fi
+done
+if [[ "$has_custom_mapping" == "true" ]]; then
+    echo -e "${CYAN}包-项目-分支映射:${NC}"
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        local_branch=$(get_package_branch "$pkg")
+        local_project=$(get_package_project "$pkg")
+        if [[ "$local_branch" != "origin/$DEFAULT_TARGET_BRANCH" || "$local_project" != "$pkg" ]]; then
+            echo -e "  ${pkg} → 项目:${local_project}, 分支:${local_branch}"
+        fi
+    done
+    echo ""
+fi
 
 # 从 accounts.json 读取凭据
 if [[ ! -f "$LOAD_ACCOUNTS_SCRIPT" ]]; then
@@ -443,17 +575,20 @@ is_running() {
 # 启动单个包的崩溃分析
 launch_package() {
     local pkg="$1"
-    log_package_status "$pkg" "running" "" "analysis started"
+    local pkg_branch=$(get_package_branch "$pkg")
+    local pkg_project=$(get_package_project "$pkg")
+    log_package_status "$pkg" "running" "" "analysis started (project: $pkg_project, branch: $pkg_branch)"
     cd "$SKILLS_DIR/coredump-full-analysis/scripts"
     local cmd=(bash analyze_crash_complete.sh
         --packages "$pkg"
+        --project "$pkg_project"
         --arch "$ARCH"
         --sys-version "$SYS_VERSION"
-        --workspace "$WORKSPACE")
+        --workspace "$WORKSPACE"
+        --target-branch "$pkg_branch")
     [[ -n "$START_DATE" ]] && cmd+=(--start-date "$START_DATE")
     [[ -n "$END_DATE" ]] && cmd+=(--end-date "$END_DATE")
     [[ "$AUTO_FIX_SUBMIT" == "true" ]] && cmd+=(--auto-fix-submit)
-    [[ -n "$TARGET_BRANCH" ]] && cmd+=(--target-branch "$TARGET_BRANCH")
     local reviewer
     for reviewer in "${REVIEWERS[@]}"; do
         cmd+=(--reviewer "$reviewer")
@@ -461,15 +596,16 @@ launch_package() {
     if SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" "${cmd[@]}" 2>&1; then
         # 如果启用了自动修复提交，调用修复映射脚本
         if [[ "$AUTO_FIX_SUBMIT" == "true" ]]; then
-            echo -e "${YELLOW}开始修复映射和Gerrit提交...${NC}"
+            echo -e "${YELLOW}开始修复映射和Gerrit提交 (项目: $pkg_project, 分支: $pkg_branch)...${NC}"
             local fix_script="$SKILLS_DIR/coredump-crash-analysis/scripts/analyze_with_fix_mapping.py"
             if [[ -f "$fix_script" ]]; then
                 # 获取用于崩溃搜索的包名（去掉base/前缀）
                 local search_pkg=$(get_crash_search_name "$pkg")
                 python3 "$fix_script" \
                     --package "$search_pkg" \
+                    --project "$pkg_project" \
                     --workspace "$WORKSPACE" \
-                    --target-branch "$TARGET_BRANCH" 2>&1
+                    --target-branch "$pkg_branch" 2>&1
                 local fix_exit_code=$?
                 if [[ $fix_exit_code -eq 0 ]]; then
                     echo -e "${GREEN}✅ 修复映射完成${NC}"

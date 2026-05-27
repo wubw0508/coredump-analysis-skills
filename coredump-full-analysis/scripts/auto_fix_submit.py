@@ -370,8 +370,7 @@ def submit_analysis_report_commit(
         f"[coredump-analysis] {package} v{clean_version(version)}: "
         f"add crash analysis report\n\n"
         f"Auto-generated analysis report covering fixable crashes "
-        f"without registered auto fixer.\n\n"
-        f"Change-Id: I" + "0" * 40
+        f"without registered auto fixer."
     )
     commit_hash = create_commit(code_dir, commit_msg, [report_filename])
     if commit_hash:

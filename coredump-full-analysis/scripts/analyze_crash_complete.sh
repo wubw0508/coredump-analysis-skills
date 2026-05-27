@@ -25,6 +25,7 @@ source "$CONFIG_DIR/package-server.env" 2>/dev/null || true
 
 # 默认值
 PACKAGE="${PACKAGE:-}"
+GERRIT_PROJECT="${GERRIT_PROJECT:-}"  # Gerrit 项目名，为空时使用 PACKAGE
 START_DATE="${START_DATE:-}"
 END_DATE="${END_DATE:-}"
 SYS_VERSION="${SYS_VERSION:-1070-1075}"
@@ -45,6 +46,15 @@ STEP_MESSAGE=""
 generate_workspace_with_timestamp() {
     local root_dir="${1:-$HOME}"
     echo "$root_dir/coredump-workspace-$(date +%Y%m%d-%H%M%S)"
+}
+
+# 获取 Gerrit 项目名（如果未指定则使用包名）
+get_gerrit_project() {
+    if [[ -n "$GERRIT_PROJECT" ]]; then
+        echo "$GERRIT_PROJECT"
+    else
+        echo "$PACKAGE"
+    fi
 }
 
 ensure_summary_dir() {
@@ -172,6 +182,8 @@ ${GREEN}选项:${NC}
     --packages <name>      包名（必需，文档推荐写法）
                            例如: dde-dock, dde-control-center, dde-launcher
     --package <name>       兼容旧参数，等价于 --packages
+    --project <name>       Gerrit 项目名（可选，默认与包名相同）
+                           例如: go-lib, base/lightdm
     --start-date <date>   开始日期（格式: YYYY-MM-DD；默认不限制）
                            例如: 2026-04-05
     --end-date <date>     结束日期（格式: YYYY-MM-DD；默认不限制）
@@ -218,6 +230,10 @@ parse_args() {
                 ;;
             --package)
                 PACKAGE="$2"
+                shift 2
+                ;;
+            --project)
+                GERRIT_PROJECT="$2"
                 shift 2
                 ;;
             --start-date)
@@ -472,11 +488,14 @@ download_source() {
 
     local filtered_csv="$1"
     local source_script="$SKILLS_DIR/coredump-code-management/scripts/download_crash_source.sh"
+    local gerrit_project=$(get_gerrit_project)
 
     if [[ ! -f "$source_script" ]]; then
         echo -e "${RED}错误: 代码管理脚本不存在: $source_script${NC}"
         return 1
     fi
+
+    echo -e "${YELLOW}Gerrit 项目: $gerrit_project${NC}"
 
     # 从崩溃版本列表获取所有需要处理的版本
     local versions_txt="$WORKSPACE/2.数据筛选/${PACKAGE}_crash_versions.txt"
@@ -494,7 +513,7 @@ download_source() {
 
             # 版本格式可能是 "epoch:version:count" 或 "version:count"
             # 正确的提取方式：去掉最后一个冒号及其后面的内容（count），然后去掉 epoch 前缀
-            local version_with_count="${version_line}"
+            local version_with_count="$version_line"
             local count="${version_with_count##*:}"  # 取最后一个冒号后面的内容
             local rest="${version_with_count%:*}"     # 去掉最后一个冒号及后面的内容
             # 如果还有冒号，说明有 epoch，去掉它
@@ -507,9 +526,9 @@ download_source() {
             echo -e "${YELLOW}处理版本: $version -> $clean_version${NC}"
             echo ""
 
-            # 设置环境变量并执行脚本
+            # 设置环境变量并执行脚本（使用 gerrit_project 而非 PACKAGE）
             if COREDUMP_WORKSPACE="$WORKSPACE" GERRIT_USER="$GERRIT_USER" GERRIT_HOST="${GERRIT_HOST:-gerrit.uniontech.com}" GERRIT_PORT="${GERRIT_PORT:-29418}" \
-               bash "$source_script" "$PACKAGE" "$clean_version"; then
+               bash "$source_script" "$gerrit_project" "$clean_version"; then
                 ((success_count++)) || true
             else
                 ((fail_count++)) || true
@@ -536,16 +555,17 @@ download_source_for_version() {
     local package="$1"
     local version="$2"
     local source_script="$SKILLS_DIR/coredump-code-management/scripts/download_crash_source.sh"
+    local gerrit_project=$(get_gerrit_project)
 
     if [[ ! -f "$source_script" ]]; then
         echo -e "${RED}错误: 代码管理脚本不存在: $source_script${NC}" >&2
         return 1
     fi
 
-    echo -e "${YELLOW}━━━ 步骤3: 切换代码到 $version ━━━${NC}"
+    echo -e "${YELLOW}━━━ 步骤3: 切换代码到 $version (项目: $gerrit_project) ━━━${NC}"
 
     # 检查本地是否已有该版本的源码
-    local repo_dir="$WORKSPACE/3.代码管理/$package"
+    local repo_dir="$WORKSPACE/3.代码管理/$gerrit_project"
     if [[ -d "$repo_dir/.git" ]]; then
         local current_tag=$(git -C "$repo_dir" describe --tags --exact-match 2>/dev/null || true)
         if [[ "$current_tag" == "$version" ]]; then
@@ -555,9 +575,9 @@ download_source_for_version() {
         fi
     fi
 
-    # 设置环境变量并执行脚本
+    # 设置环境变量并执行脚本（使用 gerrit_project 而非 package）
     if COREDUMP_WORKSPACE="$WORKSPACE" GERRIT_USER="$GERRIT_USER" GERRIT_HOST="${GERRIT_HOST:-gerrit.uniontech.com}" GERRIT_PORT="${GERRIT_PORT:-29418}" \
-       bash "$source_script" "$package" "$version" >&2; then
+       bash "$source_script" "$gerrit_project" "$version" >&2; then
         set_step_result "ok" "source checkout ready"
         echo -e "${GREEN}✅ 代码切换完成${NC}"
         return 0
