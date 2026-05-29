@@ -149,6 +149,9 @@ bash coredump-full-analysis/scripts/analyze_crash_complete.sh \
 - 某版本 deb/dbgsym 不存在时，跳过安装，继续基于崩溃数据生成分析。
 - deb/dbgsym 版本匹配支持常见 Debian 构建后缀，例如 `-1`、`+build`、`.1-1`。
 - 源码 tag 无精确匹配时，源码脚本会保留当前可用状态；分析仍继续。
+- 崩溃数据下载始终按包名（package）查询，不按 Gerrit project 名查询；像 `base/lightdm:lightdm`、`go-lib:golang-github-linuxdeepin-go-lib-dev` 这类映射项，下载阶段必须传右侧包名。
+- `analyze_with_fix_mapping.py` 现已兼容可选 `--project` 参数：`--package` 仍决定筛选 CSV/崩溃归属，`--project` 仅用于 Gerrit/修复映射场景，不能反过来替代下载包名。
+- `generate_ai_report.py` 自带 `scripts/` 路径注入，调用时不需要额外手工设置 `PYTHONPATH` 才能导入 `package_rules.py`。
 
 ## 输出文件
 

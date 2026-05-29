@@ -153,13 +153,54 @@ def make_cluster_result_path(package: str, version: str, workspace: Path) -> Pat
     return workspace / "5.崩溃分析" / package / f"version_{version_dir}" / "auto_fix_clusters_result.json"
 
 
+def normalize_target_ref_candidates(target_ref: str) -> List[str]:
+    raw = (target_ref or "").strip()
+    candidates = []
+    seen = set()
+
+    def add(value: str):
+        value = (value or "").strip()
+        if value and value not in seen:
+            seen.add(value)
+            candidates.append(value)
+
+    add(raw)
+
+    collapsed = raw
+    while "origin/origin/" in collapsed:
+        collapsed = collapsed.replace("origin/origin/", "origin/")
+    add(collapsed)
+
+    no_origin = collapsed
+    while no_origin.startswith("origin/"):
+        no_origin = no_origin[len("origin/"):]
+        add(no_origin)
+
+    return candidates
+
+
+
 def checkout_target_branch(code_dir: Path, target_ref: str, branch_name: str):
     run_git(code_dir, ["fetch", "origin"], check=False)
-    if git_ref_exists(code_dir, target_ref):
-        run_git(code_dir, ["checkout", "-B", branch_name, target_ref])
-        return
-    fallback = target_ref.replace("origin/", "")
-    run_git(code_dir, ["checkout", "-B", branch_name, fallback])
+    candidates = normalize_target_ref_candidates(target_ref)
+
+    for candidate in candidates:
+        if git_ref_exists(code_dir, candidate):
+            run_git(code_dir, ["checkout", "-B", branch_name, candidate])
+            return
+
+    last_error = None
+    for candidate in candidates:
+        result = run_git(code_dir, ["checkout", "-B", branch_name, candidate], check=False)
+        if result.returncode == 0:
+            return
+        last_error = result.stderr.strip() or result.stdout.strip() or f"checkout failed: {candidate}"
+
+    raise subprocess.CalledProcessError(
+        returncode=128,
+        cmd=["git", "-C", str(code_dir), "checkout", "-B", branch_name, target_ref],
+        stderr=last_error,
+    )
 
 
 def build_fix_branch_name(package: str, version: str) -> str:
@@ -194,8 +235,18 @@ def abort_cherry_pick(code_dir: Path):
     run_git(code_dir, ["cherry-pick", "--abort"], check=False)
 
 
+def normalize_target_branch_for_push(target_branch: str) -> str:
+    candidates = normalize_target_ref_candidates(target_branch)
+    for candidate in candidates:
+        if not candidate.startswith("origin/"):
+            return candidate
+    return candidates[-1] if candidates else target_branch
+
+
+
 def push_to_gerrit(code_dir: Path, target_branch: str, reviewers: List[str]) -> bool:
-    refspec = f"HEAD:refs/for/{target_branch}"
+    push_branch = normalize_target_branch_for_push(target_branch)
+    refspec = f"HEAD:refs/for/{push_branch}"
     if reviewers:
         refspec += "%r=" + ",".join(reviewers)
     result = run_git(code_dir, ["push", "origin", refspec], check=False)
@@ -364,7 +415,13 @@ def submit_analysis_report_commit(
         result["dry_run"] = True
         return result
 
-    checkout_target_branch(code_dir, target_branch, branch_name)
+    try:
+        checkout_target_branch(code_dir, target_branch, branch_name)
+    except subprocess.CalledProcessError as exc:
+        result["reason"] = f"target branch unavailable: {target_branch}"
+        result["checkout_error"] = (exc.stderr or str(exc)).strip()
+        return result
+
     report_path.write_text(report_content, encoding="utf-8")
     commit_msg = (
         f"[coredump-analysis] {package} v{clean_version(version)}: "
@@ -377,13 +434,14 @@ def submit_analysis_report_commit(
         result["commit_hash"] = commit_hash
         result["submitted"] = push_to_gerrit(
             code_dir,
-            target_branch.replace("origin/", "", 1),
+            target_branch,
             reviewers,
         )
     # 清理：checkout 后删掉报告文件以免影响后续操作
     if report_path.exists():
         report_path.unlink()
-    run_git(code_dir, ["checkout", target_branch.replace("origin/", "", 1)], check=False)
+    restore_branch = normalize_target_branch_for_push(target_branch)
+    run_git(code_dir, ["checkout", restore_branch], check=False)
 
     return result
 
@@ -480,7 +538,7 @@ def run_cluster_auto_fix(
             result["analysis_only"].append(fix_result.to_dict())
 
     if result["commit_hashes"] and not dry_run:
-        result["submitted"] = push_to_gerrit(code_dir, target_branch.replace("origin/", "", 1), reviewers)
+        result["submitted"] = push_to_gerrit(code_dir, target_branch, reviewers)
 
     # --- Fallback: 当所有 cluster 都是 analysis_only（没有代码修改），但有 fixable 崩溃时，
     #     生成分析报告 commit 并推送到 Gerrit，确保分析结果被记录 ---
@@ -693,7 +751,7 @@ def main():
                 result["commit_hash"] = head.stdout.strip()
                 result["submitted"] = push_to_gerrit(
                     code_dir,
-                    args.target_branch.replace("origin/", "", 1),
+                    args.target_branch,
                     args.reviewer,
                 )
 

@@ -29,8 +29,9 @@ from gerrit_client import GerritClient, GerritConfig
 class CrashAnalyzerWithFixMapping:
     """集成修复映射的崩溃分析器"""
 
-    def __init__(self, package: str, workspace: str, target_branch: str = "origin/develop/eagle"):
+    def __init__(self, package: str, workspace: str, target_branch: str = "origin/develop/eagle", project: Optional[str] = None):
         self.package = package
+        self.project = project or package
         self.workspace = workspace
         self.target_branch = target_branch
         self.classifier = CrashClassifier(ClassifierConfig())
@@ -54,7 +55,7 @@ class CrashAnalyzerWithFixMapping:
             return FixMapper.create_for_dde_dock()
         else:
             # 返回空的映射器
-            return FixMapper(known_fixes={}, project=self.package)
+            return FixMapper(known_fixes={}, project=self.project)
 
     def parse_frames(self, stack_info: str) -> List[Dict]:
         """解析堆栈帧"""
@@ -155,7 +156,7 @@ class CrashAnalyzerWithFixMapping:
     def check_fix_in_branch(self, fix: Dict) -> bool:
         """检查修复是否已在目标分支中"""
         commit_hash = fix.get('commit_hash', '')
-        project = fix.get('project', self.package)
+        project = fix.get('project', self.project)
 
         if not commit_hash:
             return False
@@ -315,6 +316,7 @@ if (obj == nullptr) {{
 def main():
     parser = argparse.ArgumentParser(description='崩溃分析 - 集成修复映射和Gerrit提交')
     parser.add_argument('--package', required=True, help='包名')
+    parser.add_argument('--project', help='Gerrit 项目名（可选，默认与包名相同）')
     parser.add_argument('--workspace', required=True, help='工作目录')
     parser.add_argument('--target-branch', default='origin/develop/eagle', help='目标分支')
     parser.add_argument('--filtered-csv', help='筛选后的CSV文件路径')
@@ -331,6 +333,7 @@ def main():
     # 创建分析器并执行分析
     analyzer = CrashAnalyzerWithFixMapping(
         package=args.package,
+        project=args.project,
         workspace=args.workspace,
         target_branch=args.target_branch
     )

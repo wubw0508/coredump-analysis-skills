@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """生成AI崩溃分析报告 (AI_analysis_report.md)"""
 import json
+import sys
 from pathlib import Path
 from collections import defaultdict
 import argparse
 from datetime import datetime
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PARENT_SCRIPTS_DIR = SCRIPT_DIR.parent
+if str(PARENT_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(PARENT_SCRIPTS_DIR))
 
 from package_rules import get_pattern_ai_explanations
 
