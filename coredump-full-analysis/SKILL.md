@@ -140,7 +140,8 @@ bash coredump-full-analysis/scripts/analyze_crash_complete.sh \
 4. 筛选、去重并生成版本统计。
 5. 按版本循环：切换源码、下载包、安装包、分析崩溃。
 6. 生成 `full_analysis_report.md` 和 `AI_analysis_report.md`。
-7. 生成 `6.总结报告/final_conclusion.md` 和 `summary_statistics.json`。
+7. 基于 `filtered_<package>_crash_data.csv` 更新持久化唯一崩溃基线，产出新增崩溃 diff。
+8. 生成 `6.总结报告/final_conclusion.md` 和 `summary_statistics.json`。
 
 运行特性：
 
@@ -159,6 +160,8 @@ bash coredump-full-analysis/scripts/analyze_crash_complete.sh \
 | `<workspace>/2.数据筛选/filtered_<package>_crash_data.csv` | 筛选去重后的崩溃数据 |
 | `<workspace>/2.数据筛选/<package>_crash_statistics.json` | 统计摘要 |
 | `<workspace>/2.数据筛选/<package>_crash_versions.txt` | 待分析版本列表 |
+| `<workspace>/2.数据筛选/<package>_crash_baseline_diff.json` | 与历史唯一崩溃基线的增量比对结果 |
+| `<workspace>/2.数据筛选/<package>_new_crashes.csv` | 本次发现的新增唯一崩溃 |
 | `<workspace>/3.代码管理/<package>/` | 源码仓库 |
 | `<workspace>/4.包管理/downloads/` | deb/dbgsym 下载目录；无 sudo 安装能力时可能为空 |
 | `<workspace>/5.崩溃分析/<package>/version_*/analysis_report.md` | 版本级分析报告 |
@@ -168,6 +171,8 @@ bash coredump-full-analysis/scripts/analyze_crash_complete.sh \
 | `<workspace>/6.总结报告/summary_statistics.json` | 当前包总结统计 |
 | `<workspace>/6.总结报告/gerrit-web-report/index.html` | 已提交 Gerrit 修复变更的本地网页报告 |
 | `<workspace>/6.总结报告/gerrit-web-report/data.json` | Gerrit 网页报告的结构化数据 |
+| `<workspace>/6.总结报告/new_crashes_overview.json` | 多包新增唯一崩溃汇总（供周报/自动化比较） |
+| `<workspace>/6.总结报告/new_crashes_overview.md` | 多包新增唯一崩溃人类可读汇总 |
 
 注意：`6.总结报告/` 是当前包的总结目录。多包顺序分析时，该目录里的 `final_conclusion.md` 和 `summary_statistics.json` 会被后续包覆盖；长期保留应优先查看每个包目录下的 `AI_analysis_report.md` 和 `full_analysis_report.md`。
 

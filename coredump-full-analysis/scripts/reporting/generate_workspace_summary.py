@@ -412,6 +412,86 @@ def collect_auto_fix_overview(workspace, packages):
     }
 
 
+def collect_new_crash_overview(workspace, packages):
+    entries = []
+    package_counts = {}
+    total_new = 0
+    packages_with_new = 0
+    baseline_root = ''
+    for package in packages:
+        diff_path = workspace / '2.数据筛选' / f'{package}_crash_baseline_diff.json'
+        data = read_json(diff_path)
+        if not data:
+            continue
+        new_count = int(data.get('new_unique_count', 0) or 0)
+        current_count = int(data.get('current_unique_count', 0) or 0)
+        baseline_before = int(data.get('baseline_unique_count_before', 0) or 0)
+        baseline_after = int(data.get('baseline_unique_count_after', 0) or 0)
+        baseline_root = baseline_root or data.get('baseline_root', '')
+        package_counts[package] = new_count
+        total_new += new_count
+        if new_count > 0:
+            packages_with_new += 1
+        for row in data.get('new_crashes', []):
+            entries.append({
+                'package': package,
+                'version': row.get('Version', ''),
+                'signal': row.get('Sig', ''),
+                'exe': row.get('Exe', ''),
+                'count': row.get('Count', ''),
+                'unique_key': row.get('UniqueKey', ''),
+            })
+    entries.sort(key=lambda item: (item['package'], item['version'], item['signal'], item['exe'], item['unique_key']))
+    return {
+        'generated_at': datetime.now().isoformat(timespec='seconds'),
+        'workspace': str(workspace),
+        'baseline_root': baseline_root,
+        'packages_scanned': len(packages),
+        'packages_with_new_crashes': packages_with_new,
+        'total_new_unique_crashes': total_new,
+        'package_new_counts': dict(sorted(package_counts.items())),
+        'entries': entries,
+    }
+
+
+def render_new_crash_overview_md(overview):
+    lines = [
+        '# New Crash Overview',
+        '',
+        f"生成时间: {overview.get('generated_at', '')}",
+        f"Workspace: {overview.get('workspace', '')}",
+        f"Baseline Root: {overview.get('baseline_root', '')}",
+        '',
+        '## 总览',
+        '',
+        f"- 扫描包数: {overview.get('packages_scanned', 0)}",
+        f"- 有新增崩溃的包数: {overview.get('packages_with_new_crashes', 0)}",
+        f"- 新增唯一崩溃总数: {overview.get('total_new_unique_crashes', 0)}",
+        '',
+        '## 按包统计',
+        '',
+    ]
+    package_counts = overview.get('package_new_counts', {})
+    if package_counts:
+        lines.append('| package | new_unique_crashes |')
+        lines.append('|---------|--------------------|')
+        for package, count in sorted(package_counts.items()):
+            lines.append(f'| {package} | {count} |')
+    else:
+        lines.append('无')
+    lines.extend(['', '## 新增崩溃明细', ''])
+    entries = overview.get('entries', [])
+    if entries:
+        lines.append('| package | version | signal | exe | count | unique_key |')
+        lines.append('|---------|---------|--------|-----|-------|------------|')
+        for item in entries:
+            lines.append(f"| {item['package']} | {item['version']} | {item['signal']} | {item['exe']} | {item['count']} | {item['unique_key']} |")
+    else:
+        lines.append('无新增唯一崩溃')
+    lines.append('')
+    return "\n".join(lines)
+
+
 def render_auto_fix_overview_md(overview):
     lines = [
         "# Auto Fix Overview",
@@ -647,7 +727,9 @@ def write_manifest_md(path, manifest):
         f"- 有效记录: {totals['valid_records']}\n",
         f"- 唯一崩溃: {totals['unique_crashes']}\n",
         f"- 版本数: {totals['versions']}\n",
-        f"- 已分析版本: {totals['analyzed_versions']}\n\n",
+        f"- 已分析版本: {totals['analyzed_versions']}\n",
+        f"- 新增唯一崩溃: {totals.get('new_unique_crashes', 0)}\n",
+        f"- 出现新增崩溃的包: {totals.get('packages_with_new_crashes', 0)}\n\n",
         "## 包状态\n\n",
         "| 包 | 状态 | 有效记录 | 唯一崩溃 | 版本 | 已分析版本 | 源码 | 源码失败 | 包跳过 | 报告 |\n",
         "|----|------|----------|----------|------|------------|------|----------|--------|------|\n",
@@ -678,7 +760,9 @@ def write_all_summary(path, manifest):
         f"- 有效崩溃记录: {totals['valid_records']}\n",
         f"- 唯一崩溃: {totals['unique_crashes']}\n",
         f"- 版本数: {totals['versions']}\n",
-        f"- 已分析版本: {totals['analyzed_versions']}\n\n",
+        f"- 已分析版本: {totals['analyzed_versions']}\n",
+        f"- 新增唯一崩溃: {totals.get('new_unique_crashes', 0)}\n",
+        f"- 出现新增崩溃的包: {totals.get('packages_with_new_crashes', 0)}\n\n",
         "## Top 包\n\n",
         "| 包 | 状态 | 有效记录 | 唯一崩溃 | 版本数 | 报告 |\n",
         "|----|------|----------|----------|--------|------|\n",
@@ -931,6 +1015,9 @@ def main():
 
     manifest = generate_manifest(workspace, packages, package_statuses, version_statuses, args.date_range_label)
     clusters = collect_clusters(workspace, packages)
+    new_crash_overview = collect_new_crash_overview(workspace, packages)
+    manifest['totals']['new_unique_crashes'] = new_crash_overview.get('total_new_unique_crashes', 0)
+    manifest['totals']['packages_with_new_crashes'] = new_crash_overview.get('packages_with_new_crashes', 0)
     retry_packages, retry_versions = build_retry_targets(workspace, manifest, version_statuses, run_context)
 
     if args.list_failed:
@@ -948,8 +1035,11 @@ def main():
         "date_range": manifest["date_range"],
         "totals": manifest["totals"],
         "packages": manifest["packages"],
+        "new_crash_overview": new_crash_overview,
     })
     write_all_summary(summary_dir / "all_packages_summary.md", manifest)
+    write_json(summary_dir / "new_crashes_overview.json", new_crash_overview)
+    (summary_dir / "new_crashes_overview.md").write_text(render_new_crash_overview_md(new_crash_overview), encoding="utf-8")
     write_json(summary_dir / "root_cause_clusters.json", clusters)
     write_cluster_md(summary_dir / "root_cause_clusters.md", clusters)
     auto_fix_overview = collect_auto_fix_overview(workspace, packages)

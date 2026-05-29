@@ -181,6 +181,18 @@ else:
 
 PYEOF
 
+BASELINE_ROOT="${CRASH_BASELINE_ROOT:-$HOME/coredump-baseline}"
+BASELINE_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reporting/update_unique_crash_baseline.py"
+if [[ -f "$BASELINE_SCRIPT" && -f "filtered_${PACKAGE}_crash_data.csv" ]]; then
+    echo ""
+    echo "更新唯一崩溃基线并检测新增崩溃..."
+    python3 "$BASELINE_SCRIPT" \
+        --package "$PACKAGE" \
+        --filtered-csv "$WORKSPACE/2.数据筛选/filtered_${PACKAGE}_crash_data.csv" \
+        --workspace "$WORKSPACE" \
+        --baseline-root "$BASELINE_ROOT"
+fi
+
 echo ""
 echo "✅ 步骤2完成"
-ls -la filtered_*_crash_data.csv *_statistics.json 2>/dev/null || true
+ls -la filtered_*_crash_data.csv *_statistics.json *_crash_baseline_diff.json *_new_crashes.csv 2>/dev/null || true

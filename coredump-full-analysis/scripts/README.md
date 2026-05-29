@@ -53,7 +53,7 @@ auto-fix（INTERNAL — 不建议直接调用）
 
 | 脚本 | 用途 |
 |------|------|
-| `reporting/generate_workspace_summary.py` | workspace 汇总：run_manifest/retry_summary/root_cause_clusters |
+| `reporting/generate_workspace_summary.py` | workspace 汇总：run_manifest/retry_summary/root_cause_clusters/new_crashes_overview |
 | `reporting/generate_gerrit_web_report.py` | Gerrit web HTML 报告 |
 | `reporting/generate_version_list.py` | 从 crash_statistics.json 生成 version_list.txt |
 | `reporting/generate_full_report.py` | 生成 full_analysis_report.md |

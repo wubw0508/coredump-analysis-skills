@@ -92,6 +92,35 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
         }, ensure_ascii=False), encoding='utf-8')
         (workspace / '2.数据筛选' / 'dde-launcher_crash_versions.txt').write_text('dde-launcher:5.7.25.1-1:5\n', encoding='utf-8')
 
+        (workspace / '2.数据筛选' / 'dde-dock_crash_baseline_diff.json').write_text(json.dumps({
+            'package': 'dde-dock',
+            'baseline_root': '/tmp/coredump-baseline',
+            'current_unique_count': 2,
+            'baseline_unique_count_before': 1,
+            'baseline_unique_count_after': 2,
+            'new_unique_count': 1,
+            'known_unique_count': 1,
+            'new_crashes': [
+                {
+                    'Version': '5.9.1',
+                    'Sig': 'SIGSEGV',
+                    'Exe': 'dde-dock',
+                    'Count': '3',
+                    'UniqueKey': 'dde-dock|SIGSEGV|5.9.1|libdde-dock:DockItem::paint'
+                }
+            ]
+        }, ensure_ascii=False), encoding='utf-8')
+        (workspace / '2.数据筛选' / 'dde-launcher_crash_baseline_diff.json').write_text(json.dumps({
+            'package': 'dde-launcher',
+            'baseline_root': '/tmp/coredump-baseline',
+            'current_unique_count': 1,
+            'baseline_unique_count_before': 1,
+            'baseline_unique_count_after': 1,
+            'new_unique_count': 0,
+            'known_unique_count': 1,
+            'new_crashes': []
+        }, ensure_ascii=False), encoding='utf-8')
+
         (workspace / SUMMARY_DIR_NAME / 'package_status.tsv').write_text(
             '2026-05-28T09:00:00\tdde-dock\tcompleted\t0\tdone\n'
             '2026-05-28T09:00:00\tdde-launcher\tfailed\t1\tsource missing\n',
@@ -128,6 +157,8 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
             retry_version_commands = (summary_dir / 'retry_versions.sh').read_text(encoding='utf-8')
             auto_fix_overview = json.loads((summary_dir / 'auto_fix_overview.json').read_text(encoding='utf-8'))
             auto_fix_overview_md = (summary_dir / 'auto_fix_overview.md').read_text(encoding='utf-8')
+            new_crashes_overview = json.loads((summary_dir / 'new_crashes_overview.json').read_text(encoding='utf-8'))
+            new_crashes_overview_md = (summary_dir / 'new_crashes_overview.md').read_text(encoding='utf-8')
 
         package_map = {entry['package']: entry for entry in manifest['packages']}
         self.assertEqual('completed', package_map['dde-dock']['status'])
@@ -146,6 +177,13 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
         self.assertIn('dde-dock', auto_fix_overview_md)
         self.assertIn('code_fix_submitted', auto_fix_overview_md)
         self.assertIn('analysis_report_submitted', auto_fix_overview_md)
+        self.assertEqual(1, new_crashes_overview['total_new_unique_crashes'])
+        self.assertEqual(1, new_crashes_overview['packages_with_new_crashes'])
+        self.assertEqual(1, new_crashes_overview['package_new_counts']['dde-dock'])
+        self.assertIn('dde-dock', new_crashes_overview_md)
+        self.assertIn('新增唯一崩溃总数: 1', new_crashes_overview_md)
+        self.assertEqual(1, manifest['totals']['new_unique_crashes'])
+        self.assertEqual(1, manifest['totals']['packages_with_new_crashes'])
         self.assertIn('auto_fix_overview.md 已生成', result.stdout)
         self.assertIn('retry_versions.md 已生成', result.stdout)
 
@@ -156,18 +194,19 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
             result = subprocess.run([
                 'bash', str(VALIDATE_SCRIPT),
                 '--workspace', str(workspace),
-            ], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            ], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             summary_dir = workspace / SUMMARY_DIR_NAME
             acceptance_report = (summary_dir / 'acceptance_report.txt').read_text(encoding='utf-8')
             acceptance_status = json.loads((summary_dir / 'acceptance_status.json').read_text(encoding='utf-8'))
 
+        self.assertEqual(1, result.returncode)
         self.assertIn('auto_fix_overview_status: present', result.stdout)
         self.assertIn('auto_fix_code_fix_submitted: 1', result.stdout)
         self.assertIn('auto_fix_analysis_report_submitted: 1', result.stdout)
         self.assertIn('== Auto Fix Overview ==', acceptance_report)
         self.assertIn('auto_fix_overview_md:', acceptance_report)
-        self.assertEqual('ok', acceptance_status['validation_status'])
+        self.assertEqual('failed', acceptance_status['validation_status'])
         self.assertTrue(acceptance_status['auto_fix_overview']['overview_json_exists'])
         self.assertTrue(acceptance_status['auto_fix_overview']['overview_md_exists'])
         self.assertEqual(2, acceptance_status['auto_fix_overview']['total_versions_with_auto_fix_results'])

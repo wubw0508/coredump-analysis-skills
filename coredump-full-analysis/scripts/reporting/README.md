@@ -11,7 +11,7 @@
 
 | 脚本 | 主要产物 | 典型调用方 |
 |------|----------|-----------|
-| `generate_workspace_summary.py` | `run_manifest.*` `all_packages_summary.*` `root_cause_clusters.*` `retry_*` `auto_fix_overview.*` | `run_analysis_agent.sh` `validate_workspace.sh` |
+| `generate_workspace_summary.py` | `run_manifest.*` `all_packages_summary.*` `root_cause_clusters.*` `retry_*` `auto_fix_overview.*` `new_crashes_overview.*` | `run_analysis_agent.sh` `validate_workspace.sh` |
 | `generate_gerrit_web_report.py` | `gerrit-web-report/index.html` | `run_analysis_agent.sh` |
 | `generate_version_list.py` | `version_list.txt` | `step5_analyze.sh` |
 | `generate_full_report.py` | `full_analysis_report.md` | `analyze_crash_complete.sh` |
@@ -26,6 +26,7 @@
   - `bash coredump-full-analysis/scripts/validate_workspace.sh`
 - 新增 workspace 级产物时，优先接入 `generate_workspace_summary.py`
 - 新增包级 Markdown/JSON 报告时，优先放在本目录，而不是重新把 reporting 逻辑塞回 scripts 顶层
+- 新增“历史基线/周增量”类汇总时，统一复用 `2.数据筛选/*_crash_baseline_diff.json` 作为 workspace 汇总输入
 
 维护要求
 - 修改产物路径后，要同步检查：

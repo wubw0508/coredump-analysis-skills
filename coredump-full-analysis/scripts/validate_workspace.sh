@@ -91,8 +91,10 @@ python3 "$SCRIPT_DIR/reporting/generate_workspace_summary.py" \
 
 echo
 echo "== 闭环校验 =="
+set +e
 VALIDATION_OUTPUT=$(python3 "$SCRIPT_DIR/validation/validate_workspace_retry_closure.py" --workspace "$WORKSPACE" 2>&1)
 VALIDATION_EXIT=$?
+set -e
 printf '%s\n' "$VALIDATION_OUTPUT"
 
 RETRY_SUMMARY="$SUMMARY_DIR/retry_summary.md"
