@@ -37,6 +37,33 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
         }, ensure_ascii=False), encoding='utf-8')
         (workspace / '5.崩溃分析' / 'dde-dock' / 'full_analysis_report.md').write_text('# full\n', encoding='utf-8')
         (workspace / '5.崩溃分析' / 'dde-dock' / 'AI_analysis_report.md').write_text('# ai\n', encoding='utf-8')
+        (workspace / '5.崩溃分析' / 'dde-dock' / 'version_5_9_1' / 'auto_fix_clusters_result.json').write_text(json.dumps({
+            'package': 'dde-dock',
+            'version': '5.9.1',
+            'total_crashes': 3,
+            'total_clusters': 1,
+            'auto_fixed': [
+                {'files_changed': ['src/dock.cpp'], 'commit_hash': 'abc123'}
+            ],
+            'analysis_only': [],
+            'submitted': True,
+            'commit_hashes': ['abc123'],
+            'branch_name': 'auto-fix/dde-dock/v5_9_1',
+        }, ensure_ascii=False), encoding='utf-8')
+        (workspace / '5.崩溃分析' / 'dde-launcher' / 'version_5_7_25_1' / 'auto_fix_result.json').write_text(json.dumps({
+            'package': 'dde-launcher',
+            'version': '5.7.25.1',
+            'total_fixable_crashes': 1,
+            'auto_fixed': [],
+            'manual_required': [
+                {'id': 'c1', 'reason': 'no stable auto fixer registered'}
+            ],
+            'submitted': False,
+            'analysis_report': {
+                'submitted': True,
+                'commit_hash': 'def456'
+            }
+        }, ensure_ascii=False), encoding='utf-8')
 
         (workspace / '2.数据筛选' / 'dde-dock_crash_statistics.json').write_text(json.dumps({
             'summary': {
@@ -98,6 +125,8 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
             retry_summary = (summary_dir / 'retry_summary.md').read_text(encoding='utf-8')
             retry_commands = (summary_dir / 'retry_commands.sh').read_text(encoding='utf-8')
             retry_version_commands = (summary_dir / 'retry_versions.sh').read_text(encoding='utf-8')
+            auto_fix_overview = json.loads((summary_dir / 'auto_fix_overview.json').read_text(encoding='utf-8'))
+            auto_fix_overview_md = (summary_dir / 'auto_fix_overview.md').read_text(encoding='utf-8')
 
         package_map = {entry['package']: entry for entry in manifest['packages']}
         self.assertEqual('completed', package_map['dde-dock']['status'])
@@ -109,6 +138,14 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
         self.assertIn('verify_retry_targets.py', retry_commands)
         self.assertIn('generate_workspace_summary.py', retry_commands)
         self.assertIn('verify_retry_targets.py', retry_version_commands)
+        self.assertEqual(2, auto_fix_overview['total_versions_with_auto_fix_results'])
+        self.assertEqual(2, auto_fix_overview['versions_with_fixable_output'])
+        self.assertEqual(1, auto_fix_overview['category_counts']['code_fix_submitted'])
+        self.assertEqual(1, auto_fix_overview['category_counts']['analysis_report_submitted'])
+        self.assertIn('dde-dock', auto_fix_overview_md)
+        self.assertIn('code_fix_submitted', auto_fix_overview_md)
+        self.assertIn('analysis_report_submitted', auto_fix_overview_md)
+        self.assertIn('auto_fix_overview.md 已生成', result.stdout)
         self.assertIn('retry_versions.md 已生成', result.stdout)
 
     def test_verify_retry_targets_reports_remaining_items(self):

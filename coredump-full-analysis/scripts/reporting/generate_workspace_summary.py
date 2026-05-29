@@ -277,6 +277,189 @@ def collect_clusters(workspace, packages):
     return result
 
 
+
+def normalize_auto_fix_version(version_dir_name, data):
+    version = data.get("version") if isinstance(data, dict) else None
+    if version:
+        return str(version)
+    return version_dir_name.replace("version_", "").replace("_", ".")
+
+
+def classify_auto_fix_result(data):
+    if not isinstance(data, dict):
+        return "no_fix_output"
+    status = data.get("status")
+    reason = data.get("reason") or ""
+    auto_fixed = data.get("auto_fixed") or []
+    analysis_only = data.get("analysis_only") or []
+    manual_required = data.get("manual_required") or []
+    analysis_report = data.get("analysis_report") or {}
+    submitted = bool(data.get("submitted"))
+
+    if status == "skipped" and "source repository is not available" in reason:
+        return "source_repo_missing"
+    if auto_fixed and submitted:
+        return "code_fix_submitted"
+    if auto_fixed:
+        return "code_fix_generated"
+    if analysis_report.get("submitted"):
+        return "analysis_report_submitted"
+    if analysis_only:
+        return "analysis_report_only"
+    if manual_required:
+        return "manual_required"
+    return "no_fix_output"
+
+
+def summarize_auto_fix_entry(package, version_dir_name, data, result_type, result_path):
+    auto_fixed = data.get("auto_fixed") or [] if isinstance(data, dict) else []
+    analysis_only = data.get("analysis_only") or [] if isinstance(data, dict) else []
+    manual_required = data.get("manual_required") or [] if isinstance(data, dict) else []
+    already_fixed = data.get("already_fixed") or [] if isinstance(data, dict) else []
+    analysis_report = data.get("analysis_report") or {} if isinstance(data, dict) else {}
+    target_missing = 0
+    for item in analysis_only + manual_required:
+        item_reason = (item.get("reason") or "") if isinstance(item, dict) else ""
+        if any(token in item_reason for token in ("target file", "target_file", "not found", "不存在", "missing")):
+            target_missing += 1
+    return {
+        "package": package,
+        "version": normalize_auto_fix_version(version_dir_name, data),
+        "result_type": result_type,
+        "category": classify_auto_fix_result(data),
+        "submitted": bool(data.get("submitted")) if isinstance(data, dict) else False,
+        "total_fixable_crashes": int(data.get("total_fixable_crashes", 0) or 0) if isinstance(data, dict) else 0,
+        "total_crashes": int(data.get("total_crashes", 0) or 0) if isinstance(data, dict) else 0,
+        "total_clusters": int(data.get("total_clusters", 0) or 0) if isinstance(data, dict) else 0,
+        "auto_fixed_count": len(auto_fixed),
+        "analysis_only_count": len(analysis_only),
+        "manual_required_count": len(manual_required),
+        "already_fixed_count": len(already_fixed),
+        "analysis_report_submitted": bool(analysis_report.get("submitted")),
+        "analysis_report_commit_hash": analysis_report.get("commit_hash"),
+        "commit_hash": data.get("commit_hash") if isinstance(data, dict) else None,
+        "commit_hashes": data.get("commit_hashes") or [] if isinstance(data, dict) else [],
+        "branch_name": data.get("branch_name") if isinstance(data, dict) else None,
+        "reason": data.get("reason") if isinstance(data, dict) else None,
+        "target_missing_indicators": target_missing,
+        "result_file": str(result_path),
+    }
+
+
+def collect_auto_fix_overview(workspace, packages):
+    entries = []
+    category_counts = defaultdict(int)
+    package_rollup = defaultdict(lambda: {
+        "versions": 0,
+        "fixable_versions": 0,
+        "code_fix_submitted": 0,
+        "code_fix_generated": 0,
+        "analysis_report_submitted": 0,
+        "analysis_report_only": 0,
+        "manual_required": 0,
+        "source_repo_missing": 0,
+        "no_fix_output": 0,
+        "target_missing_indicators": 0,
+    })
+
+    for package in packages:
+        package_dir = workspace / "5.崩溃分析" / package
+        for version_dir in sorted(package_dir.glob("version_*")):
+            candidates = [
+                ("cluster", version_dir / "auto_fix_clusters_result.json"),
+                ("spec", version_dir / "auto_fix_result.json"),
+            ]
+            for result_type, result_path in candidates:
+                if not result_path.exists():
+                    continue
+                data = read_json(result_path) or {}
+                entry = summarize_auto_fix_entry(package, version_dir.name, data, result_type, result_path)
+                entries.append(entry)
+                category_counts[entry["category"]] += 1
+                rollup = package_rollup[package]
+                rollup["versions"] += 1
+                if any([
+                    entry["total_fixable_crashes"] > 0,
+                    entry["total_clusters"] > 0,
+                    entry["analysis_only_count"] > 0,
+                    entry["manual_required_count"] > 0,
+                    entry["auto_fixed_count"] > 0,
+                ]):
+                    rollup["fixable_versions"] += 1
+                rollup[entry["category"]] += 1
+                rollup["target_missing_indicators"] += entry["target_missing_indicators"]
+                break
+
+    entries.sort(key=lambda item: (item["package"], item["version"], item["result_type"]))
+    package_summary = [{"package": package, **metrics} for package, metrics in sorted(package_rollup.items())]
+    return {
+        "generated_at": datetime.now().isoformat(),
+        "workspace": str(workspace),
+        "total_versions_with_auto_fix_results": len(entries),
+        "versions_with_fixable_output": sum(
+            1 for e in entries
+            if any([
+                e["total_fixable_crashes"] > 0,
+                e["total_clusters"] > 0,
+                e["analysis_only_count"] > 0,
+                e["manual_required_count"] > 0,
+                e["auto_fixed_count"] > 0,
+            ])
+        ),
+        "category_counts": dict(sorted(category_counts.items())),
+        "packages": package_summary,
+        "entries": entries,
+    }
+
+
+def render_auto_fix_overview_md(overview):
+    lines = [
+        "# Auto Fix Overview",
+        "",
+        f"生成时间: {overview.get('generated_at', '')}",
+        f"Workspace: {overview.get('workspace', '')}",
+        "",
+        "## 总览",
+        "",
+        f"- 产出 auto-fix 结果的版本数: {overview.get('total_versions_with_auto_fix_results', 0)}",
+        f"- 含 fixable / analysis-only / manual-required 输出的版本数: {overview.get('versions_with_fixable_output', 0)}",
+        "",
+        "## 分类统计",
+        "",
+    ]
+    category_counts = overview.get("category_counts", {})
+    if category_counts:
+        for key, value in sorted(category_counts.items()):
+            lines.append(f"- {key}: {value}")
+    else:
+        lines.append("- 无 auto-fix 结果")
+
+    lines.extend(["", "## 按包汇总", ""])
+    packages = overview.get("packages", [])
+    if packages:
+        lines.append("| package | versions | fixable_versions | code_fix_submitted | code_fix_generated | analysis_report_submitted | analysis_report_only | manual_required | source_repo_missing | target_missing_indicators |")
+        lines.append("|---------|----------|------------------|--------------------|--------------------|---------------------------|----------------------|----------------|---------------------|---------------------------|")
+        for item in packages:
+            lines.append(
+                f"| {item['package']} | {item['versions']} | {item['fixable_versions']} | {item['code_fix_submitted']} | {item['code_fix_generated']} | {item['analysis_report_submitted']} | {item['analysis_report_only']} | {item['manual_required']} | {item['source_repo_missing']} | {item['target_missing_indicators']} |"
+            )
+    else:
+        lines.append("无")
+
+    lines.extend(["", "## 版本明细", ""])
+    entries = overview.get("entries", [])
+    if entries:
+        lines.append("| package | version | type | category | submitted | auto_fixed | analysis_only | manual_required | analysis_report_submitted | result_file |")
+        lines.append("|---------|---------|------|----------|-----------|------------|---------------|-----------------|---------------------------|-------------|")
+        for item in entries:
+            lines.append(
+                f"| {item['package']} | {item['version']} | {item['result_type']} | {item['category']} | {str(item['submitted'])} | {item['auto_fixed_count']} | {item['analysis_only_count']} | {item['manual_required_count']} | {str(item['analysis_report_submitted'])} | {item['result_file']} |"
+            )
+    else:
+        lines.append("无")
+    lines.append("")
+    return "\n".join(lines)
+
 def clean_version_label(value):
     value = (value or "").strip()
     if not value:
@@ -769,6 +952,9 @@ def main():
     write_all_summary(summary_dir / "all_packages_summary.md", manifest)
     write_json(summary_dir / "root_cause_clusters.json", clusters)
     write_cluster_md(summary_dir / "root_cause_clusters.md", clusters)
+    auto_fix_overview = collect_auto_fix_overview(workspace, packages)
+    write_json(summary_dir / "auto_fix_overview.json", auto_fix_overview)
+    (summary_dir / "auto_fix_overview.md").write_text(render_auto_fix_overview_md(auto_fix_overview), encoding="utf-8")
     write_retry_packages(summary_dir / "retry_packages.txt", retry_packages)
     write_json(summary_dir / "retry_versions.json", retry_versions)
     write_retry_versions_tsv(summary_dir / "retry_versions.tsv", retry_versions)
@@ -781,6 +967,7 @@ def main():
     print(f"✅ run_manifest.md 已生成: {summary_dir / 'run_manifest.md'}")
     print(f"✅ all_packages_summary.md 已生成: {summary_dir / 'all_packages_summary.md'}")
     print(f"✅ root_cause_clusters.md 已生成: {summary_dir / 'root_cause_clusters.md'}")
+    print(f"✅ auto_fix_overview.md 已生成: {summary_dir / 'auto_fix_overview.md'}")
     print(f"✅ retry_packages.txt 已生成: {summary_dir / 'retry_packages.txt'}")
     print(f"✅ retry_versions.md 已生成: {summary_dir / 'retry_versions.md'}")
     print(f"✅ retry_versions.sh 已生成: {summary_dir / 'retry_versions.sh'}")
