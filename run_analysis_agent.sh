@@ -336,44 +336,81 @@ get_package_project() {
     echo "${PACKAGE_PROJECT_MAP[$pkg]:-$pkg}"
 }
 
-# 验证必需参数
-if [[ -z "$PACKAGES" ]]; then
-    # 未指定 --packages，尝试从 packages.txt 读取默认项目列表
-    if [[ -f "$PACKAGES_FILE" ]]; then
-        echo -e "${YELLOW}未指定 --packages，从 $PACKAGES_FILE 读取默认项目列表${NC}"
-        PACKAGES=$(parse_packages_file "$PACKAGES_FILE")
-        if [[ -z "$PACKAGES" ]]; then
-            echo -e "${RED}错误: packages.txt 为空${NC}"
-            exit 1
-        fi
-        local_count=$(echo "$PACKAGES" | tr ',' '\n' | wc -l)
-        echo -e "${GREEN}已加载 ${local_count} 个分析项目${NC}"
-        # 显示自定义分支或项目映射的包
-        for pkg in "${!PACKAGE_BRANCH_MAP[@]}"; do
-            local branch="${PACKAGE_BRANCH_MAP[$pkg]}"
-            local project="${PACKAGE_PROJECT_MAP[$pkg]}"
-            if [[ "$branch" != "origin/$DEFAULT_TARGET_BRANCH" || "$project" != "$pkg" ]]; then
-                echo -e "  ${CYAN}${pkg} → 项目:${project}, 分支:${branch}${NC}"
-            fi
-        done
-    else
+load_default_packages_if_needed() {
+    if [[ -n "$PACKAGES" ]]; then
+        return 0
+    fi
+
+    if [[ ! -f "$PACKAGES_FILE" ]]; then
         echo -e "${RED}错误: 必须指定 --packages 参数，且 packages.txt 不存在${NC}"
         show_help
         exit 1
     fi
-fi
 
-# 转换为数组（支持逗号分隔）
-IFS=',' read -ra PACKAGE_ARRAY <<< "$PACKAGES"
-PACKAGE_COUNT=${#PACKAGE_ARRAY[@]}
+    echo -e "${YELLOW}未指定 --packages，从 $PACKAGES_FILE 读取默认项目列表${NC}"
+    PACKAGES=$(parse_packages_file "$PACKAGES_FILE")
+    if [[ -z "$PACKAGES" ]]; then
+        echo -e "${RED}错误: packages.txt 为空${NC}"
+        exit 1
+    fi
 
-# 如果命令行指定了 --target-branch，覆盖所有包的分支
-if [[ -n "$TARGET_BRANCH" ]]; then
+    local local_count
+    local_count=$(echo "$PACKAGES" | tr ',' '\n' | wc -l)
+    echo -e "${GREEN}已加载 ${local_count} 个分析项目${NC}"
+}
+
+build_package_array() {
+    IFS=',' read -ra PACKAGE_ARRAY <<< "$PACKAGES"
+    PACKAGE_COUNT=${#PACKAGE_ARRAY[@]}
+}
+
+apply_target_branch_override() {
+    if [[ -z "$TARGET_BRANCH" ]]; then
+        return 0
+    fi
+
+    local pkg
     for pkg in "${PACKAGE_ARRAY[@]}"; do
         PACKAGE_BRANCH_MAP["$pkg"]="$TARGET_BRANCH"
     done
     DEFAULT_TARGET_BRANCH="$TARGET_BRANCH"
-fi
+}
+
+has_non_default_mapping() {
+    local pkg
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        local local_branch
+        local local_project
+        local_branch=$(get_package_branch "$pkg")
+        local_project=$(get_package_project "$pkg")
+        if [[ "$local_branch" != "origin/$DEFAULT_TARGET_BRANCH" || "$local_project" != "$pkg" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+print_non_default_mappings() {
+    has_non_default_mapping || return 0
+
+    echo -e "${CYAN}包-项目-分支映射:${NC}"
+    local pkg
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        local local_branch
+        local local_project
+        local_branch=$(get_package_branch "$pkg")
+        local_project=$(get_package_project "$pkg")
+        if [[ "$local_branch" != "origin/$DEFAULT_TARGET_BRANCH" || "$local_project" != "$pkg" ]]; then
+            echo -e "  ${pkg} → 项目:${local_project}, 分支:${local_branch}"
+        fi
+    done
+    echo ""
+}
+
+# 验证必需参数
+load_default_packages_if_needed
+build_package_array
+apply_target_branch_override
 
 # 包名处理函数
 # 搜索崩溃时使用不带base/的包名，下载和分析代码时使用带base/的包名
@@ -420,26 +457,7 @@ echo "  Gerrit网页服务: $SERVE_GERRIT_WEB_REPORT"
 echo ""
 
 # 显示包-分支映射
-has_custom_mapping=false
-for pkg in "${PACKAGE_ARRAY[@]}"; do
-    local_branch=$(get_package_branch "$pkg")
-    local_project=$(get_package_project "$pkg")
-    if [[ "$local_branch" != "origin/$DEFAULT_TARGET_BRANCH" || "$local_project" != "$pkg" ]]; then
-        has_custom_mapping=true
-        break
-    fi
-done
-if [[ "$has_custom_mapping" == "true" ]]; then
-    echo -e "${CYAN}包-项目-分支映射:${NC}"
-    for pkg in "${PACKAGE_ARRAY[@]}"; do
-        local_branch=$(get_package_branch "$pkg")
-        local_project=$(get_package_project "$pkg")
-        if [[ "$local_branch" != "origin/$DEFAULT_TARGET_BRANCH" || "$local_project" != "$pkg" ]]; then
-            echo -e "  ${pkg} → 项目:${local_project}, 分支:${local_branch}"
-        fi
-    done
-    echo ""
-fi
+print_non_default_mappings
 
 # 从 accounts.json 读取凭据
 if [[ ! -f "$LOAD_ACCOUNTS_SCRIPT" ]]; then
@@ -505,8 +523,34 @@ report_progress() {
         ((pkg_index++)) || true
     done
 
+    print_auto_fix_progress_summary
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
+}
+
+print_auto_fix_progress_summary() {
+    local overview_json="$WORKSPACE/$SUMMARY_DIR_NAME/auto_fix_overview.json"
+    if [[ ! -f "$overview_json" ]]; then
+        echo -e "${YELLOW}Auto-fix汇总: 尚未生成（通常在 workspace 汇总后出现）${NC}"
+        return 0
+    fi
+
+    python3 - "$overview_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+with path.open(encoding='utf-8') as f:
+    data = json.load(f)
+counts = data.get('category_counts', {})
+print('Auto-fix汇总:')
+print(f"  已产出结果版本: {data.get('total_versions_with_auto_fix_results', 0)}")
+print(f"  真修复已提交: {counts.get('code_fix_submitted', 0)}")
+print(f"  仅分析报告已提交: {counts.get('analysis_report_submitted', 0)}")
+print(f"  需人工处理: {counts.get('manual_required', 0)}")
+print(f"  源码缺失: {counts.get('source_repo_missing', 0)}")
+PY
 }
 
 ensure_summary_dir() {
@@ -612,6 +656,64 @@ is_running() {
     kill -0 "$1" 2>/dev/null
 }
 
+start_package_jobs() {
+    local pids_name="$1"
+    local status_icon="${2:-✅}"
+    local pid
+    local pkg
+
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        launch_package "$pkg" > "$LOG_DIR/analysis_${pkg}.log" 2>&1 &
+        pid=$!
+        eval "$pids_name+=(\"$pid\")"
+        echo -e "${GREEN}${status_icon} $pkg 已启动 (PID: $pid)${NC}"
+    done
+}
+
+any_pid_running() {
+    local pid
+    for pid in "$@"; do
+        if is_running "$pid"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+wait_for_pids() {
+    local overall_exit=0
+    local pid
+    for pid in "$@"; do
+        wait "$pid" || overall_exit=$?
+    done
+    return "$overall_exit"
+}
+
+print_workspace_output_paths() {
+    echo -e "${GREEN}输出文件:${NC}"
+    local pkg
+    for pkg in "${PACKAGE_ARRAY[@]}"; do
+        echo "  $pkg:"
+        echo "    统计报告: $WORKSPACE/2.数据筛选/${pkg}_crash_statistics.json"
+        echo "    筛选数据: $WORKSPACE/2.数据筛选/filtered_${pkg}_crash_data.csv"
+        echo "    分析报告: $WORKSPACE/5.崩溃分析/${pkg}/"
+    done
+    echo "  Workspace汇总: $WORKSPACE/$SUMMARY_DIR_NAME/run_manifest.md"
+    echo "  跨包汇总: $WORKSPACE/$SUMMARY_DIR_NAME/all_packages_summary.md"
+    echo "  Auto-fix汇总: $WORKSPACE/$SUMMARY_DIR_NAME/auto_fix_overview.md"
+    echo "  Gerrit网页报告: $WORKSPACE/$SUMMARY_DIR_NAME/gerrit-web-report/index.html"
+    echo "  问题簇汇总: $WORKSPACE/$SUMMARY_DIR_NAME/root_cause_clusters.md"
+    echo "  失败包清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_packages.txt"
+    echo "  失败版本清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.md"
+    echo "  重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_commands.sh"
+    echo "  版本重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.sh"
+    echo "  失败步骤重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_failed_steps.sh"
+    echo "  闭环校验: python3 coredump-full-analysis/scripts/validation/validate_workspace_retry_closure.py --workspace $WORKSPACE"
+    echo "  一键验收: bash coredump-full-analysis/scripts/validate_workspace.sh --workspace $WORKSPACE"
+    echo "  验收报告: $WORKSPACE/$SUMMARY_DIR_NAME/acceptance_report.txt"
+    echo "  验收状态: $WORKSPACE/$SUMMARY_DIR_NAME/acceptance_status.json"
+}
+
 # 启动单个包的崩溃分析
 launch_package() {
     local pkg="$1"
@@ -670,13 +772,8 @@ if [[ "$RUN_BACKGROUND" == "true" ]]; then
     init_package_status_file
     echo -e "${YELLOW}后台运行模式${NC}"
     echo "并行启动 $PACKAGE_COUNT 个包的分析..."
-    declare -a PIDS
-    for pkg in "${PACKAGE_ARRAY[@]}"; do
-        launch_package "$pkg" > "$LOG_DIR/analysis_${pkg}.log" 2>&1 &
-        pid=$!
-        PIDS+=($pid)
-        echo -e "${GREEN}✅ $pkg 已启动 (PID: $pid)${NC}"
-    done
+    declare -a PIDS=()
+    start_package_jobs PIDS "✅"
 
     (
         overall_exit=0
@@ -703,29 +800,15 @@ elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
     echo "并行启动 $PACKAGE_COUNT 个包的分析..."
     echo ""
 
-    declare -a PIDS
-    for pkg in "${PACKAGE_ARRAY[@]}"; do
-        launch_package "$pkg" > "$LOG_DIR/analysis_${pkg}.log" 2>&1 &
-        pid=$!
-        PIDS+=($pid)
-        echo -e "${GREEN}🚀 $pkg 已启动 (PID: $pid)${NC}"
-    done
+    declare -a PIDS=()
+    start_package_jobs PIDS "🚀"
 
     # 初始化
     START_TIME=$(date +%s)
     LAST_REPORT_TIME=$START_TIME
 
     # 监控循环：检查所有进程是否结束
-    any_running() {
-        for pid in "${PIDS[@]}"; do
-            if kill -0 "$pid" 2>/dev/null; then
-                return 0
-            fi
-        done
-        return 1
-    }
-
-    while any_running; do
+    while any_pid_running "${PIDS[@]}"; do
         CURRENT_TIME=$(date +%s)
         ELAPSED=$((CURRENT_TIME - START_TIME))
         INTERVAL_PASSED=$((CURRENT_TIME - LAST_REPORT_TIME))
@@ -740,9 +823,7 @@ elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
 
     # 等待所有进程结束
     ALL_EXIT_CODE=0
-    for pid in "${PIDS[@]}"; do
-        wait "$pid" || ALL_EXIT_CODE=$?
-    done
+    wait_for_pids "${PIDS[@]}" || ALL_EXIT_CODE=$?
 
     # 最终进度报告
     END_TIME=$(date +%s)
@@ -759,28 +840,9 @@ elif [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
 
     report_progress $TOTAL_ELAPSED ""
 
-    echo -e "${GREEN}输出文件:${NC}"
-    for pkg in "${PACKAGE_ARRAY[@]}"; do
-        echo "  $pkg:"
-        echo "    统计报告: $WORKSPACE/2.数据筛选/${pkg}_crash_statistics.json"
-        echo "    筛选数据: $WORKSPACE/2.数据筛选/filtered_${pkg}_crash_data.csv"
-        echo "    分析报告: $WORKSPACE/5.崩溃分析/${pkg}/"
-    done
     generate_workspace_reports ""
     generate_gerrit_web_report
-    echo "  Workspace汇总: $WORKSPACE/$SUMMARY_DIR_NAME/run_manifest.md"
-    echo "  跨包汇总: $WORKSPACE/$SUMMARY_DIR_NAME/all_packages_summary.md"
-    echo "  Gerrit网页报告: $WORKSPACE/$SUMMARY_DIR_NAME/gerrit-web-report/index.html"
-    echo "  问题簇汇总: $WORKSPACE/$SUMMARY_DIR_NAME/root_cause_clusters.md"
-    echo "  失败包清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_packages.txt"
-    echo "  失败版本清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.md"
-    echo "  重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_commands.sh"
-    echo "  版本重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.sh"
-    echo "  失败步骤重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_failed_steps.sh"
-    echo "  闭环校验: python3 coredump-full-analysis/scripts/validation/validate_workspace_retry_closure.py --workspace $WORKSPACE"
-    echo "  一键验收: bash coredump-full-analysis/scripts/validate_workspace.sh --workspace $WORKSPACE"
-    echo "  验收报告: $WORKSPACE/$SUMMARY_DIR_NAME/acceptance_report.txt"
-    echo "  验收状态: $WORKSPACE/$SUMMARY_DIR_NAME/acceptance_status.json"
+    print_workspace_output_paths
 
     if [[ $ALL_EXIT_CODE -eq 0 ]]; then
         echo ""
@@ -826,17 +888,7 @@ else
         echo -e "${RED}以下包分析失败:${NC}"
         printf '  - %s\n' "${FAILED_PACKAGES[@]}"
         echo ""
-        echo "Workspace汇总: $WORKSPACE/$SUMMARY_DIR_NAME/run_manifest.md"
-        echo "Gerrit网页报告: $WORKSPACE/$SUMMARY_DIR_NAME/gerrit-web-report/index.html"
-        echo "失败包清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_packages.txt"
-        echo "失败版本清单: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.md"
-        echo "重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_commands.sh"
-        echo "版本重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_versions.sh"
-        echo "失败步骤重跑脚本: $WORKSPACE/$SUMMARY_DIR_NAME/retry_failed_steps.sh"
-        echo "闭环校验: python3 coredump-full-analysis/scripts/validation/validate_workspace_retry_closure.py --workspace $WORKSPACE"
-        echo "一键验收: bash coredump-full-analysis/scripts/validate_workspace.sh --workspace $WORKSPACE"
-        echo "验收报告: $WORKSPACE/$SUMMARY_DIR_NAME/acceptance_report.txt"
-        echo "验收状态: $WORKSPACE/$SUMMARY_DIR_NAME/acceptance_status.json"
+        print_workspace_output_paths
         exit "$OVERALL_EXIT_CODE"
     fi
 fi

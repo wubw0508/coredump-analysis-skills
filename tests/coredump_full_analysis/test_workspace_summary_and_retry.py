@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SUMMARY_SCRIPT = REPO_ROOT / 'coredump-full-analysis' / 'scripts' / 'reporting' / 'generate_workspace_summary.py'
 VERIFY_SCRIPT = REPO_ROOT / 'coredump-full-analysis' / 'scripts' / 'validation' / 'verify_retry_targets.py'
+VALIDATE_SCRIPT = REPO_ROOT / 'coredump-full-analysis' / 'scripts' / 'validate_workspace.sh'
 SUMMARY_DIR_NAME = '6.总结报告'
 
 
@@ -147,6 +148,31 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
         self.assertIn('analysis_report_submitted', auto_fix_overview_md)
         self.assertIn('auto_fix_overview.md 已生成', result.stdout)
         self.assertIn('retry_versions.md 已生成', result.stdout)
+
+
+    def test_validate_workspace_records_auto_fix_acceptance_summary(self):
+        with TemporaryDirectory() as tmp:
+            workspace = self.create_workspace(Path(tmp))
+            result = subprocess.run([
+                'bash', str(VALIDATE_SCRIPT),
+                '--workspace', str(workspace),
+            ], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+
+            summary_dir = workspace / SUMMARY_DIR_NAME
+            acceptance_report = (summary_dir / 'acceptance_report.txt').read_text(encoding='utf-8')
+            acceptance_status = json.loads((summary_dir / 'acceptance_status.json').read_text(encoding='utf-8'))
+
+        self.assertIn('auto_fix_overview_status: present', result.stdout)
+        self.assertIn('auto_fix_code_fix_submitted: 1', result.stdout)
+        self.assertIn('auto_fix_analysis_report_submitted: 1', result.stdout)
+        self.assertIn('== Auto Fix Overview ==', acceptance_report)
+        self.assertIn('auto_fix_overview_md:', acceptance_report)
+        self.assertEqual('ok', acceptance_status['validation_status'])
+        self.assertTrue(acceptance_status['auto_fix_overview']['overview_json_exists'])
+        self.assertTrue(acceptance_status['auto_fix_overview']['overview_md_exists'])
+        self.assertEqual(2, acceptance_status['auto_fix_overview']['total_versions_with_auto_fix_results'])
+        self.assertEqual(1, acceptance_status['auto_fix_overview']['category_counts']['code_fix_submitted'])
+        self.assertEqual(1, acceptance_status['auto_fix_overview']['category_counts']['analysis_report_submitted'])
 
     def test_verify_retry_targets_reports_remaining_items(self):
         with TemporaryDirectory() as tmp:

@@ -1,3 +1,4 @@
+import os
 import subprocess
 import textwrap
 import unittest
@@ -17,12 +18,13 @@ def script_without_runtime_validation() -> str:
 
 
 class RunAnalysisAgentHelpTests(unittest.TestCase):
-    def run_script(self, *args):
+    def run_script(self, *args, env=None):
         return subprocess.run(
             ['bash', str(SCRIPT_PATH), *args],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            env=env,
         )
 
     def test_help_mentions_default_progress_interval_and_auto_fix(self):
@@ -50,6 +52,24 @@ class RunAnalysisAgentHelpTests(unittest.TestCase):
         result = self.run_script('--progress', '--help')
         self.assertEqual(0, result.returncode)
         self.assertIn('默认使用 180 秒', result.stdout)
+
+    def test_missing_packages_file_reports_error(self):
+        with TemporaryDirectory() as tmp:
+            env = os.environ.copy()
+            env.update(HOME=tmp, SKILLS_DIR=tmp)
+            result = self.run_script(env=env)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('必须指定 --packages 参数，且 packages.txt 不存在', result.stdout)
+
+    def test_empty_packages_file_reports_error(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / 'packages.txt').write_text('\n# only comments\n', encoding='utf-8')
+            env = os.environ.copy()
+            env.update(HOME=tmp, SKILLS_DIR=str(tmp_path))
+            result = self.run_script(env=env)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('packages.txt 为空', result.stdout)
 
 
 class PackagesFileParsingTests(unittest.TestCase):
@@ -100,6 +120,34 @@ class PackagesFileParsingTests(unittest.TestCase):
             result = subprocess.run(['bash', '-c', cmd], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
         self.assertEqual('dde-dock\n', result.stdout)
+
+
+    def test_apply_target_branch_override_updates_all_packages(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            script_copy = tmp_path / 'run_analysis_agent.sh'
+            script_copy.write_text(script_without_runtime_validation(), encoding='utf-8')
+            cmd = textwrap.dedent(f'''\
+                set -euo pipefail
+                source {script_copy}
+                PACKAGES='dde-dock,dde-launcher'
+                parse_packages_file /dev/null >/dev/null
+                build_package_array
+                TARGET_BRANCH='origin/feature/test'
+                apply_target_branch_override
+                printf 'BRANCH_DOCK=%s\n' "$(get_package_branch dde-dock)"
+                printf 'BRANCH_LAUNCHER=%s\n' "$(get_package_branch dde-launcher)"
+                printf 'DEFAULT=%s\n' "$DEFAULT_TARGET_BRANCH"
+            ''')
+            result = subprocess.run(['bash', '-c', cmd], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+
+        self.assertIn('BRANCH_DOCK=origin/feature/test', result.stdout)
+        self.assertIn('BRANCH_LAUNCHER=origin/feature/test', result.stdout)
+        self.assertIn('DEFAULT=origin/feature/test', result.stdout)
+
+    def test_output_summary_lists_auto_fix_overview_path(self):
+        content = SCRIPT_PATH.read_text(encoding='utf-8')
+        self.assertIn('Auto-fix汇总: $WORKSPACE/$SUMMARY_DIR_NAME/auto_fix_overview.md', content)
 
 
 if __name__ == '__main__':
