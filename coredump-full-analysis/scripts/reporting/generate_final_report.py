@@ -453,7 +453,7 @@ def main():
 
     if not versions and not version_list:
         print("错误: 没有找到任何分析结果或版本清单")
-        print("请先运行 analyze_crash_loop.sh 进行分析")
+        print("请先运行当前主链路完成分析，例如 analyze_crash_complete.sh 或 run_analysis_agent.sh")
         return 1
 
     # 计算统计

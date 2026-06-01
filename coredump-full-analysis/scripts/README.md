@@ -38,14 +38,11 @@ auto-fix（INTERNAL — 不建议直接调用）
 
 | 脚本 | 用途 |
 |------|------|
-| `auto_fix_submit.py` | auto-fix 主入口：cluster/spec 两条路径 + analysis-report fallback |
-| `auto_fix_and_submit.py` | 旧版 auto-fix 入口（已被 auto_fix_submit.py 取代） |
-| `deep_auto_fix.py` | 深度自动化修复系统（已被 auto_fix_submit.py 集成） |
+| `auto_fix_submit.py` | auto-fix 主入口：cluster/spec 两条路径；仅真实代码修改允许提交 Gerrit |
 | `auto_fix_types.py` | FixPlan/FixResult/CrashCluster 数据类型 |
 | `fixers/` | 包级修复器（dde-dock/launcher/control-center/clipboard/polkit-agent/startdde） |
 | `fixers/common.py` | 修复器通用工具（apply_replacements/get_fix_specs） |
 | `create_patch.sh` | 为可修复崩溃生成补丁文件 |
-| `submit_to_gerrit.sh` | Gerrit 提交脚本 |
 
 报告/汇总（INTERNAL TOOLING）
 
@@ -84,9 +81,7 @@ legacy / experimental（已弃用）
 
 | 脚本 / 目录 | 用途 |
 |-------------|------|
-| `analyze_crash_loop.sh` | 旧版循环分析流程（已被 analyze_crash_complete.sh 取代） |
-| `analyze_single_version.sh` | 旧版单版本分析（已被 analyze_crash_per_version.py 取代） |
-| `legacy/` | 已弃用脚本的历史实现，顶层保留兼容 stub |
+| `legacy/` | 已弃用脚本的历史实现 |
 
 参见 `legacy/README.md` 了解完整的 legacy 策略。
 

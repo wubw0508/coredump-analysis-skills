@@ -62,7 +62,7 @@ ${GREEN}用法:${NC}
 
 ${GREEN}默认行为:${NC}
     - 不指定 --packages 时：自动从 packages.txt 读取当前启用的 24 个默认项目
-    - --auto-fix-submit 当前默认已开启
+    - --auto-fix-submit 当前默认已开启（仅真实代码修改可提交 Gerrit）
     - --progress 不带数值时，默认使用 ${DEFAULT_PROGRESS_INTERVAL} 秒
 
 ${GREEN}必需参数:${NC}
@@ -84,7 +84,7 @@ ${GREEN}可选参数:${NC}
     --background          后台运行
     --progress [秒]       启用进度监控；不带值时默认 ${DEFAULT_PROGRESS_INTERVAL} 秒
     --interval <秒>       进度报告间隔 (默认: ${DEFAULT_PROGRESS_INTERVAL} 秒)
-    --auto-fix-submit     分析后自动检查 target branch 是否已修复，并对已注册 fixer 的模式尝试自动提交
+    --auto-fix-submit     分析后自动检查 target branch 是否已修复，并仅在真实代码修改时自动提交 Gerrit
     --target-branch <br>  强制所有包使用同一分支 (覆盖 packages.txt 中的配置)
     --reviewer <email>    自动提交时附加 reviewer，可多次指定
     --no-gerrit-web-report      禁用分析结束后的 Gerrit 网页报告生成
@@ -547,7 +547,7 @@ counts = data.get('category_counts', {})
 print('Auto-fix汇总:')
 print(f"  已产出结果版本: {data.get('total_versions_with_auto_fix_results', 0)}")
 print(f"  真修复已提交: {counts.get('code_fix_submitted', 0)}")
-print(f"  仅分析报告已提交: {counts.get('analysis_report_submitted', 0)}")
+print(f"  历史无效说明文档提交: {counts.get('legacy_analysis_report_submitted', 0)}")
 print(f"  需人工处理: {counts.get('manual_required', 0)}")
 print(f"  源码缺失: {counts.get('source_repo_missing', 0)}")
 PY

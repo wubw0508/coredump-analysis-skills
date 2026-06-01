@@ -189,7 +189,8 @@ def record_from_gerrit_commit_file(path: Path, workspace: Path, data: Dict[str, 
 
 def records_from_auto_fix_file(path: Path, workspace: Path, data: Dict[str, Any]) -> List[GerritFixRecord]:
     submitted = data.get("submitted") is True or data.get("fixes_submitted") is True
-    if not submitted:
+    auto_fixed = data.get("auto_fixed")
+    if not submitted or not isinstance(auto_fixed, list) or not auto_fixed:
         return []
     package_from_path, version_from_path = derive_package_version_from_path(path, workspace)
     commit_hashes = []

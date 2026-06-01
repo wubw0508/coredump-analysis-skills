@@ -306,7 +306,7 @@ def classify_auto_fix_result(data):
     if auto_fixed:
         return "code_fix_generated"
     if analysis_report.get("submitted"):
-        return "analysis_report_submitted"
+        return "legacy_analysis_report_submitted"
     if analysis_only:
         return "analysis_report_only"
     if manual_required:
@@ -357,7 +357,7 @@ def collect_auto_fix_overview(workspace, packages):
         "fixable_versions": 0,
         "code_fix_submitted": 0,
         "code_fix_generated": 0,
-        "analysis_report_submitted": 0,
+        "legacy_analysis_report_submitted": 0,
         "analysis_report_only": 0,
         "manual_required": 0,
         "source_repo_missing": 0,
@@ -521,11 +521,11 @@ def render_auto_fix_overview_md(overview):
     lines.extend(["", "## 按包汇总", ""])
     packages = overview.get("packages", [])
     if packages:
-        lines.append("| package | versions | fixable_versions | code_fix_submitted | code_fix_generated | analysis_report_submitted | analysis_report_only | manual_required | source_repo_missing | target_branch_unavailable | target_missing_indicators |")
-        lines.append("|---------|----------|------------------|--------------------|--------------------|---------------------------|----------------------|----------------|---------------------|---------------------------|---------------------------|")
+        lines.append("| package | versions | fixable_versions | code_fix_submitted | code_fix_generated | legacy_analysis_report_submitted | analysis_report_only | manual_required | source_repo_missing | target_branch_unavailable | target_missing_indicators |")
+        lines.append("|---------|----------|------------------|--------------------|--------------------|----------------------------------|----------------------|----------------|---------------------|---------------------------|---------------------------|")
         for item in packages:
             lines.append(
-                f"| {item['package']} | {item['versions']} | {item['fixable_versions']} | {item['code_fix_submitted']} | {item['code_fix_generated']} | {item['analysis_report_submitted']} | {item['analysis_report_only']} | {item['manual_required']} | {item['source_repo_missing']} | {item['target_branch_unavailable']} | {item['target_missing_indicators']} |"
+                f"| {item['package']} | {item['versions']} | {item['fixable_versions']} | {item['code_fix_submitted']} | {item['code_fix_generated']} | {item['legacy_analysis_report_submitted']} | {item['analysis_report_only']} | {item['manual_required']} | {item['source_repo_missing']} | {item['target_branch_unavailable']} | {item['target_missing_indicators']} |"
             )
     else:
         lines.append("无")
@@ -533,8 +533,8 @@ def render_auto_fix_overview_md(overview):
     lines.extend(["", "## 版本明细", ""])
     entries = overview.get("entries", [])
     if entries:
-        lines.append("| package | version | type | category | submitted | auto_fixed | analysis_only | manual_required | analysis_report_submitted | result_file |")
-        lines.append("|---------|---------|------|----------|-----------|------------|---------------|-----------------|---------------------------|-------------|")
+        lines.append("| package | version | type | category | submitted | auto_fixed | analysis_only | manual_required | legacy_analysis_report_submitted | result_file |")
+        lines.append("|---------|---------|------|----------|-----------|------------|---------------|-----------------|----------------------------------|-------------|")
         for item in entries:
             lines.append(
                 f"| {item['package']} | {item['version']} | {item['result_type']} | {item['category']} | {str(item['submitted'])} | {item['auto_fixed_count']} | {item['analysis_only_count']} | {item['manual_required_count']} | {str(item['analysis_report_submitted'])} | {item['result_file']} |"
@@ -617,7 +617,7 @@ def build_retry_targets(workspace, manifest, version_statuses, run_context):
                 for step, status in step_status.items()
                 if not (
                     step == "autofix"
-                    and auto_fix_category in {"target_branch_unavailable", "analysis_report_submitted", "analysis_report_only", "manual_required", "source_repo_missing", "no_fix_output"}
+                    and auto_fix_category in {"target_branch_unavailable", "legacy_analysis_report_submitted", "analysis_report_only", "manual_required", "source_repo_missing", "no_fix_output"}
                 )
             ):
                 needs_retry = True

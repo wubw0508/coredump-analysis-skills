@@ -6,7 +6,6 @@
 - 默认项目清单来自仓库根目录 `packages.txt`
 - 当前 `packages.txt` 启用了 24 个默认项目，全量分析默认按这 24 个项目执行
 - 当前主入口是 `run_analysis_agent.sh` 和 `coredump-full-analysis/scripts/analyze_crash_complete.sh`
-- `coredump-full-analysis/scripts/analyze_dde_launcher_*.sh`、`analyze_all_versions.sh` 等属于 legacy，不再作为主链路维护
 
 ## 一、总体架构
 
@@ -75,7 +74,7 @@ F --> J
 - 自动二次深挖至少扩展到 `600` 帧
 - 深挖触发条件：`fixable == 'uncertain'` / app-layer signal / `count >= 3`
 
-## 四、自动修复提交与报告 fallback
+## 四、自动修复提交规则
 
 ```mermaid
 graph TD
@@ -84,17 +83,17 @@ B -->|有| C[尝试生成代码修复]
 B -->|无| D[进入 spec path / manual_required]
 C --> E{产生真实源码变更?}
 E -->|是| F[提交 Gerrit]
-E -->|否| G[生成 coredump-analysis-report.md fallback]
-D --> H{存在 fixable crash?}
-H -->|是| G
-H -->|否| I[仅保留分析结果]
+E -->|否| G[仅保留本地分析结果]
+D --> H{存在可自动应用的代码修复?}
+H -->|是| F
+H -->|否| G
 F --> J[auto_fix_result.json / auto_fix_clusters_result.json]
 G --> J
-I --> J
 ```
 
 说明：
-- “真实修复提交”和“分析报告 fallback 提交”必须区分
+- 只有真实代码修改（源码改动或代码 cherry-pick）才允许提交 Gerrit
+- 仅分析文件 / 说明文档不会自动提交 Gerrit，只保留在本地结果中
 - Gerrit Web Report 是辅助汇总，不是自动提交是否成功的唯一真相来源
 - 自动修复链路的详细覆盖情况见 `references/fixer-architecture.md`
 
@@ -142,13 +141,3 @@ bash coredump-full-analysis/scripts/analyze_crash_complete.sh --package <package
 
 ## 七、不要再把这些当作主链路
 
-以下脚本仅为历史兼容/对照保留：
-- `analyze_dde_launcher_auto.sh`
-- `analyze_dde_launcher_full.sh`
-- `analyze_all_versions.sh`
-- `auto_analysis.sh`
-- `analyze_and_fix.sh`
-- `auto_analyze_and_fix.sh`
-
-如需理解历史原因，请看：
-- `coredump-full-analysis/scripts/LEGACY.md`

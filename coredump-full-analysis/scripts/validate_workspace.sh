@@ -125,7 +125,7 @@ counts = data.get('category_counts', {})
 print('auto_fix_overview_status: present')
 print(f"auto_fix_versions: {data.get('total_versions_with_auto_fix_results', 0)}")
 print(f"auto_fix_code_fix_submitted: {counts.get('code_fix_submitted', 0)}")
-print(f"auto_fix_analysis_report_submitted: {counts.get('analysis_report_submitted', 0)}")
+print(f"auto_fix_legacy_analysis_report_submitted: {counts.get('legacy_analysis_report_submitted', 0)}")
 print(f"auto_fix_manual_required: {counts.get('manual_required', 0)}")
 print(f"auto_fix_source_repo_missing: {counts.get('source_repo_missing', 0)}")
 PY

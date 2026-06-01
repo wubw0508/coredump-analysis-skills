@@ -173,10 +173,10 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
         self.assertEqual(2, auto_fix_overview['total_versions_with_auto_fix_results'])
         self.assertEqual(2, auto_fix_overview['versions_with_fixable_output'])
         self.assertEqual(1, auto_fix_overview['category_counts']['code_fix_submitted'])
-        self.assertEqual(1, auto_fix_overview['category_counts']['analysis_report_submitted'])
+        self.assertEqual(1, auto_fix_overview['category_counts']['legacy_analysis_report_submitted'])
         self.assertIn('dde-dock', auto_fix_overview_md)
         self.assertIn('code_fix_submitted', auto_fix_overview_md)
-        self.assertIn('analysis_report_submitted', auto_fix_overview_md)
+        self.assertIn('legacy_analysis_report_submitted', auto_fix_overview_md)
         self.assertEqual(1, new_crashes_overview['total_new_unique_crashes'])
         self.assertEqual(1, new_crashes_overview['packages_with_new_crashes'])
         self.assertEqual(1, new_crashes_overview['package_new_counts']['dde-dock'])
@@ -203,7 +203,7 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
         self.assertEqual(1, result.returncode)
         self.assertIn('auto_fix_overview_status: present', result.stdout)
         self.assertIn('auto_fix_code_fix_submitted: 1', result.stdout)
-        self.assertIn('auto_fix_analysis_report_submitted: 1', result.stdout)
+        self.assertIn('auto_fix_legacy_analysis_report_submitted: 1', result.stdout)
         self.assertIn('== Auto Fix Overview ==', acceptance_report)
         self.assertIn('auto_fix_overview_md:', acceptance_report)
         self.assertEqual('failed', acceptance_status['validation_status'])
@@ -211,7 +211,7 @@ class WorkspaceSummaryAndRetryTests(unittest.TestCase):
         self.assertTrue(acceptance_status['auto_fix_overview']['overview_md_exists'])
         self.assertEqual(2, acceptance_status['auto_fix_overview']['total_versions_with_auto_fix_results'])
         self.assertEqual(1, acceptance_status['auto_fix_overview']['category_counts']['code_fix_submitted'])
-        self.assertEqual(1, acceptance_status['auto_fix_overview']['category_counts']['analysis_report_submitted'])
+        self.assertEqual(1, acceptance_status['auto_fix_overview']['category_counts']['legacy_analysis_report_submitted'])
 
     def test_verify_retry_targets_reports_remaining_items(self):
         with TemporaryDirectory() as tmp:

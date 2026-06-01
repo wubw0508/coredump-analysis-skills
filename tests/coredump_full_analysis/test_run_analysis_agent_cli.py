@@ -30,7 +30,7 @@ class RunAnalysisAgentHelpTests(unittest.TestCase):
     def test_help_mentions_default_progress_interval_and_auto_fix(self):
         result = self.run_script('--help')
         self.assertEqual(0, result.returncode)
-        self.assertIn('--auto-fix-submit 当前默认已开启', result.stdout)
+        self.assertIn('--auto-fix-submit 当前默认已开启（仅真实代码修改可提交 Gerrit）', result.stdout)
         self.assertIn('--progress 不带数值时，默认使用 180 秒', result.stdout)
 
     def test_progress_rejects_non_integer(self):

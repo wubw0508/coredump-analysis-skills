@@ -17,7 +17,7 @@
 | `generate_full_report.py` | `full_analysis_report.md` | `analyze_crash_complete.sh` |
 | `generate_final_report.py` | 最终版本级汇总报告 | `analyze_crash_complete.sh` |
 | `generate_ai_report.py` | `AI_analysis_report.md` | `analyze_crash_complete.sh` |
-| `generate_issue_doc.py` | 问题明细文档 | 旧流程/特定补充分析 |
+| `generate_issue_doc.py` | 问题明细文档 | 手工补充分析 |
 
 使用规则
 - 人工如果只是要跑分析，不应直接从这里选脚本；优先使用上层入口：

@@ -329,7 +329,7 @@ main() {
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     echo -e "补丁目录: $patch_dir"
-    echo -e "可以使用 submit_to_gerrit.sh 提交到Gerrit"
+    echo -e "请使用当前主链路处理 Gerrit 提交"
     echo ""
 }
 

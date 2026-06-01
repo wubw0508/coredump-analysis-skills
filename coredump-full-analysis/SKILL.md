@@ -80,8 +80,6 @@ bash coredump-full-analysis/scripts/analyze_crash_complete.sh \
 |------|------|
 | 单包完整流程 | `bash coredump-full-analysis/scripts/analyze_crash_complete.sh --package <pkg>` |
 | 仅下载数据 | `bash coredump-full-analysis/scripts/step1_download.sh --package <pkg>` |
-| 已有数据后循环分析版本 | `bash coredump-full-analysis/scripts/analyze_crash_loop.sh --package <pkg> --workspace <workspace>` |
-| 旧自动化流程（已废弃，不建议继续扩展） | `bash coredump-full-analysis/scripts/auto_analysis.sh --package <pkg>` |
 | 多包全量 Agent | 仓库根目录执行 `bash run_analysis_agent.sh` |
 
 `run_analysis_agent.sh` 不在本目录内，但会调用本 skill 的完整流程脚本。多包分析建议用 Agent；单包调试建议直接用 `analyze_crash_complete.sh`。
@@ -92,9 +90,7 @@ bash coredump-full-analysis/scripts/analyze_crash_complete.sh \
 
 - `analyze_crash_complete.sh`
 - `step1_download.sh`
-- `analyze_crash_loop.sh`
 
-`auto_analysis.sh` 仍保留在仓库中用于兼容旧用法，但它包含历史遗留的半自动/交互逻辑，不再作为主线自动化入口。
 
 日期显示规则：
 
@@ -178,6 +174,13 @@ bash coredump-full-analysis/scripts/analyze_crash_complete.sh \
 | `<workspace>/6.总结报告/new_crashes_overview.md` | 多包新增唯一崩溃人类可读汇总 |
 
 注意：`6.总结报告/` 是当前包的总结目录。多包顺序分析时，该目录里的 `final_conclusion.md` 和 `summary_statistics.json` 会被后续包覆盖；长期保留应优先查看每个包目录下的 `AI_analysis_report.md` 和 `full_analysis_report.md`。
+
+## Gerrit 自动提交规则
+
+当前自动提交规则：只有真实代码修改（源码改动或代码 cherry-pick 产生的提交）才允许自动推送 Gerrit。仅分析文件/说明文档（如 `coredump-analysis-report.md`）不会自动提交。
+
+- `run_analysis_agent.sh`：默认开启自动提交，但仍受上述“仅代码修改可提交”约束。
+- `coredump-full-analysis/scripts/analyze_crash_complete.sh`：默认关闭自动提交，需显式传 `--auto-fix-submit`。
 
 ## Gerrit Web Report
 
@@ -270,14 +273,6 @@ bash coredump-full-analysis/scripts/step5_analyze.sh \
     --workspace <workspace>
 ```
 
-循环分析已有数据：
-
-```bash
-bash coredump-full-analysis/scripts/analyze_crash_loop.sh \
-    --package dde-session-shell \
-    --workspace <workspace>
-```
-
 ## 命令行参数
 
 | 参数 | 说明 | 默认值 |
@@ -321,7 +316,6 @@ bash coredump-full-analysis/scripts/analyze_crash_loop.sh \
 - `../accounts.json`：唯一账号配置入口。
 - `scripts/analyze_crash_complete.sh`：完整单包流程。
 - `scripts/step1_download.sh`：数据下载阶段。
-- `scripts/analyze_crash_loop.sh`：基于已有数据循环分析版本。
 - `scripts/generate_full_report.py`：生成包级完整报告。
 - `scripts/generate_ai_report.py`：生成 AI 分析报告。
 - `scripts/generate_final_report.py`：生成总结报告。

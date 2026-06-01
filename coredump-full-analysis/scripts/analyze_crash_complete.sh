@@ -194,7 +194,7 @@ ${GREEN}选项:${NC}
                            例如: x86, x86_64, arm64
     --versions <list>     仅分析指定版本，逗号分隔
                            例如: 5.8.32,5.8.33
-    --auto-fix-submit     分析后自动检查 target branch 是否已修复，并对已注册 fixer 的模式尝试自动提交
+    --auto-fix-submit     分析后自动检查 target branch 是否已修复，并仅在真实代码修改时自动提交 Gerrit
     --target-branch <br>  自动修复提交目标分支（默认: origin/develop/eagle）
     --reviewer <email>    自动提交时附加 reviewer，可多次指定
     --max-crashes <n>     单版本最大分析崩溃数（默认: 0，分析全部）

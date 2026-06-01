@@ -154,23 +154,20 @@ So the codebase contains launcher spec knowledge, but the normal dispatcher curr
 
 `dde-clipboard`, `dde-polkit-agent`, and `startdde` currently route every cluster to `record_conservative_analysis_only` because known fixable crashes are considered to occur in system libraries or lack a safe application-layer edit point.
 
-## Analysis Report Fallback
+## Gerrit Submission Rule
 
-A key behavior change is that "no safe code edit" no longer means "no Gerrit output".
+当前规则已经收紧为：只有真实代码修改才允许自动提交 Gerrit。
 
-`auto_fix_submit.py` now generates and submits `coredump-analysis-report.md` when:
+允许自动提交的情况：
+1. cluster path 产生了真实源码改动，并成功生成代码提交
+2. spec path 成功 cherry-pick 了代码提交
 
-1. Cluster path:
-   - `auto_fixed` is empty
-   - `analysis_only` is non-empty
-   - there are fixable clusters worth recording
+不允许自动提交的情况：
+1. `auto_fixed` 为空且只有 `analysis_only`
+2. `auto_fixed` 为空且只有 `manual_required`
+3. 仅生成分析文件 / 说明文档（如 `coredump-analysis-report.md`）
 
-2. Spec path:
-   - `auto_fixed` is empty
-   - `manual_required` is non-empty
-   - `fixable_crashes` is non-empty
-
-This ensures fixable-but-non-mechanical crashes still produce a review artifact in Gerrit for human follow-up.
+这意味着 fixable-but-non-mechanical crashes 仍然会保留本地分析结果供人工跟进，但不会再自动产出 Gerrit 说明文档提交。
 
 ## Gerrit Commit Subject Rule
 
@@ -185,10 +182,6 @@ Verified current behavior:
   - `fixers/dde_polkit_agent.py`
   - `fixers/startdde.py`
   all include `[coredump-analysis]`
-- fallback analysis-report commits generated in `auto_fix_submit.py` use a subject beginning with:
-  - `[coredump-analysis] <package> v<version>: add crash analysis report`
-- `deep_auto_fix.py` generates commit messages beginning with:
-  - `[coredump-analysis] fix: ...`
 
 Important distinction:
 - `generate_gerrit_web_report.py` only reads and displays `commit_subject`; it does not generate commit titles itself
@@ -206,7 +199,7 @@ Common reasons:
 So the current system should be understood as:
 - `fixable` = likely actionable root cause
 - `auto_fixed` = a safe deterministic code edit or successful cherry-pick action exists
-- otherwise fallback = submit analysis report instead of silently dropping it
+- otherwise = keep local analysis output for human follow-up, but do not auto-submit Gerrit
 
 ## Coverage Gap Framing
 
@@ -215,9 +208,9 @@ Do not treat "generated Gerrit change" as a single bucket.
 Current interpretation should distinguish:
 - real code-changing auto-fix commits
 - cherry-pick based auto-fix commits
-- analysis-report fallback commits
+- local-only analysis/manual results that did not submit Gerrit
 
-A package may still produce useful Gerrit output even when every cluster is conservative, but that does not mean a real source-code crash fix was submitted.
+A package may still produce useful local analysis output even when every cluster is conservative, but that does not mean a real source-code crash fix was submitted.
 
 ## Highest-Value Expansion Directions
 
@@ -229,7 +222,7 @@ A package may still produce useful Gerrit output even when every cluster is cons
 6. keep reporting/metrics separated into:
    - code edits applied
    - cherry-picks applied
-   - analysis-only report submissions
+   - analysis-only / manual-only local results
 
 ## Detection Commands
 
@@ -257,6 +250,5 @@ grep -n 'coredump-analysis-report\|analysis_report' \
 # Check current commit-subject prefix coverage
 grep -RFn '\[coredump-analysis\]' \
   coredump-full-analysis/scripts/fixers \
-  coredump-full-analysis/scripts/auto_fix_submit.py \
-  coredump-full-analysis/scripts/deep_auto_fix.py
+  coredump-full-analysis/scripts/auto_fix_submit.py
 ```

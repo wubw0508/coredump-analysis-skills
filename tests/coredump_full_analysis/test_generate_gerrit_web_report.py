@@ -90,6 +90,28 @@ class GerritWebReportCollectionTests(unittest.TestCase):
                 self.assertEqual("SIGSEGV", record.signal)
                 self.assertEqual(12, record.crash_count)
 
+    def test_ignores_report_only_submissions(self):
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            self.write_json(
+                workspace / "5.崩溃分析" / "dde-launcher" / "version_1_2_3" / "auto_fix_result.json",
+                {
+                    "package": "dde-launcher",
+                    "version": "1.2.3",
+                    "submitted": True,
+                    "commit_hash": "doconly123",
+                    "auto_fixed": [],
+                    "manual_required": [
+                        {"reason": "no stable auto fixer registered"}
+                    ],
+                },
+            )
+
+            records, warnings = gerrit_report.collect_workspace_records(workspace)
+
+            self.assertEqual([], warnings)
+            self.assertEqual([], records)
+
     def test_merges_duplicate_commit_sources(self):
         with TemporaryDirectory() as tmp:
             workspace = Path(tmp)

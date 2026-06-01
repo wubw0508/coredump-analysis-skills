@@ -146,6 +146,15 @@ bash run_analysis_agent.sh --help
 - 账号或密码缺失时立即暂停流程，不做降级继续
 - deb/dbgsym 版本匹配支持 `-1`、`+build`、`.1-1` 等 Debian 构建后缀
 
+## 自动提交默认行为
+
+| 入口 | 脚本 | 自动提交默认值 | 如何关闭/开启 | 说明 |
+|------|------|----------------|---------------|------|
+| Agent 多包入口 | `run_analysis_agent.sh` | 默认开启 | 默认开启；当前没有单独的 `--no-auto-fix-submit` 开关 | 会把 `--auto-fix-submit` 传给下游完整流程；但只有真实代码修改（源码改动或代码 cherry-pick）才允许提交 Gerrit |
+| 手动单包完整流程 | `coredump-full-analysis/scripts/analyze_crash_complete.sh` | 默认关闭 | 显式传 `--auto-fix-submit` 才开启 | 适合人工调试和保守执行；即使开启自动提交，也只有真实代码修改才允许推送 Gerrit |
+
+> 说明：这里的“自动提交”仅指真实代码修改生成的 Gerrit 提交；仅分析文件/说明文档（如 `coredump-analysis-report.md`）不会自动提交。
+
 ## Gerrit 网页报告
 
 分析结束后默认会尝试生成 Gerrit Web Report：
@@ -275,21 +284,6 @@ python3 analyze_crash_final.py --package dde-dock
 - **源码失败降级**：源码克隆或版本 tag 不可用时，脚本仍基于已下载和筛选的崩溃数据生成分析报告。
 - **参数约定**：Agent 入口文档统一使用 `--packages`；`--package` 仅作为兼容别名保留。
 - **自动修复提交**：`run_analysis_agent.sh` 当前默认 `AUTO_FIX_SUBMIT=true`；如不希望分析后尝试自动修复/提交，需要显式关注调用参数与脚本行为。
-
-## Legacy 脚本说明
-
-- `coredump-full-analysis/scripts/analyze_dde_launcher_auto.sh`
-- `coredump-full-analysis/scripts/analyze_dde_launcher_full.sh`
-- `coredump-full-analysis/scripts/analyze_all_versions.sh`
-
-以上脚本属于早期 `dde-launcher` 专项流程，内部包含硬编码工作目录、版本映射和应用特定逻辑，已经不再作为主链路维护。
-
-当前统一入口只有两类：
-
-- `bash run_analysis_agent.sh ...`
-- `bash coredump-full-analysis/scripts/analyze_crash_complete.sh ...`
-
-如果需要给新包增加专项分析能力，请在 `coredump-full-analysis/scripts/rules/` 下新增规则模块，而不是复制一份新的专项脚本。
 
 ## 技能打包与安装
 
