@@ -42,9 +42,14 @@ bash coredump-full-analysis/scripts/analyze_crash_complete.sh --package dde-dock
 
 Important defaults:
 
-- auto-fix-submit is enabled by default unless disabled by environment
-- `analyze_crash_complete.sh --max-crashes` defaults to `0` (all deduplicated crashes)
-- enhanced addr2line defaults to `300` frames; automatic deep dive uses at least `600`
+- Workflow switches and analysis depth are centralized in `$SKILLS_DIR/analysis_config.json`; data filtering is mandatory and has no disable switch.
+- Every configurable item in `analysis_config.json` has a sibling `*_comment` field explaining meaning, default behavior, expected impact, and override method.
+- `workflow.enable_code_management` controls step 3 source clone/checkout; disabled runs log `source=skipped_disabled` and analysis continues with degraded source/git context.
+- `workflow.enable_package_management` controls step 4 deb/dbgsym download and install; disabled runs log `package=skipped_disabled` and analysis continues without package install.
+- `workflow.enable_auto_fix_submit` controls the default auto-fix-submit behavior; override per run with `AUTO_FIX_SUBMIT=false`, `--auto-fix-submit`, or `--no-auto-fix-submit`.
+- `analysis.max_crashes` controls the per-version crash count depth; default `0` means all deduplicated crashes.
+- `analysis.addr2line_max_frames` controls enhanced addr2line frame depth; default `500`.
+- CLI/env still override config: `--max-crashes`, `--addr2line-max-frames`, `MAX_CRASHES`, `ADDR2LINE_MAX_FRAMES`.
 
 ## Workspace first stops
 

@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_DIR="${SKILLS_DIR:-$SCRIPT_DIR/../..}"
 CONFIG_DIR="$SCRIPT_DIR/../config"
 LOAD_ACCOUNTS_SCRIPT="$SCRIPT_DIR/load_accounts.sh"
+ANALYSIS_CONFIG_FILE="${ANALYSIS_CONFIG_FILE:-$SKILLS_DIR/analysis_config.json}"
 
 source "$CONFIG_DIR/package-server.env" 2>/dev/null || true
 
@@ -33,9 +34,11 @@ ARCH="${ARCH:-amd64}"  # 默认使用 amd64 架构
 SELECTED_VERSIONS="${SELECTED_VERSIONS:-}"
 WORKSPACE="${WORKSPACE:-}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-180}"  # 进度上报间隔（秒），0表示禁用
-MAX_CRASHES="${MAX_CRASHES:-0}"  # 单版本最大分析崩溃数，0表示分析全部
-ADDR2LINE_MAX_FRAMES="${ADDR2LINE_MAX_FRAMES:-300}"  # addr2line 最大解析帧数
-AUTO_FIX_SUBMIT="${AUTO_FIX_SUBMIT:-false}"
+MAX_CRASHES="${MAX_CRASHES:-}"  # 单版本最大分析崩溃数，0表示分析全部
+ADDR2LINE_MAX_FRAMES="${ADDR2LINE_MAX_FRAMES:-}"  # addr2line 最大解析帧数
+ENABLE_CODE_MANAGEMENT="${ENABLE_CODE_MANAGEMENT:-}"
+ENABLE_PACKAGE_MANAGEMENT="${ENABLE_PACKAGE_MANAGEMENT:-}"
+AUTO_FIX_SUBMIT="${AUTO_FIX_SUBMIT:-}"
 TARGET_BRANCH="${TARGET_BRANCH:-origin/develop/eagle}"
 REVIEWERS=()
 SUMMARY_DIR_NAME="6.总结报告"
@@ -138,6 +141,64 @@ version_selected() {
     return 1
 }
 
+normalize_bool() {
+    local value="$1"
+    local default_value="${2:-true}"
+    case "${value,,}" in
+        true|1|yes|y|on|enable|enabled) echo "true" ;;
+        false|0|no|n|off|disable|disabled) echo "false" ;;
+        *) echo "$default_value" ;;
+    esac
+}
+
+read_config_bool() {
+    local jq_path="$1"
+    local default_value="$2"
+    if [[ -f "$ANALYSIS_CONFIG_FILE" ]] && command -v jq &> /dev/null; then
+        local value
+        value=$(jq -r "$jq_path // empty" "$ANALYSIS_CONFIG_FILE" 2>/dev/null || true)
+        if [[ -n "$value" && "$value" != "null" ]]; then
+            normalize_bool "$value" "$default_value"
+            return 0
+        fi
+    fi
+    echo "$default_value"
+}
+
+read_config_int() {
+    local jq_path="$1"
+    local default_value="$2"
+    if [[ -f "$ANALYSIS_CONFIG_FILE" ]] && command -v jq &> /dev/null; then
+        local value
+        value=$(jq -r "$jq_path // empty" "$ANALYSIS_CONFIG_FILE" 2>/dev/null || true)
+        if [[ "$value" =~ ^[0-9]+$ ]]; then
+            echo "$value"
+            return 0
+        fi
+    fi
+    echo "$default_value"
+}
+
+load_workflow_config() {
+    local config_code_management
+    local config_package_management
+    local config_auto_fix_submit
+    local config_max_crashes
+    local config_addr2line_max_frames
+
+    config_code_management=$(read_config_bool '.workflow.enable_code_management' true)
+    config_package_management=$(read_config_bool '.workflow.enable_package_management' true)
+    config_auto_fix_submit=$(read_config_bool '.workflow.enable_auto_fix_submit' false)
+    config_max_crashes=$(read_config_int '.analysis.max_crashes' 0)
+    config_addr2line_max_frames=$(read_config_int '.analysis.addr2line_max_frames' 500)
+
+    ENABLE_CODE_MANAGEMENT=$(normalize_bool "${ENABLE_CODE_MANAGEMENT:-$config_code_management}" "$config_code_management")
+    ENABLE_PACKAGE_MANAGEMENT=$(normalize_bool "${ENABLE_PACKAGE_MANAGEMENT:-$config_package_management}" "$config_package_management")
+    AUTO_FIX_SUBMIT=$(normalize_bool "${AUTO_FIX_SUBMIT:-$config_auto_fix_submit}" "$config_auto_fix_submit")
+    MAX_CRASHES="${MAX_CRASHES:-$config_max_crashes}"
+    ADDR2LINE_MAX_FRAMES="${ADDR2LINE_MAX_FRAMES:-$config_addr2line_max_frames}"
+}
+
 # 检查配置完整性
 check_config() {
     echo -e "${BLUE}检查配置完整性...${NC}"
@@ -195,10 +256,11 @@ ${GREEN}选项:${NC}
     --versions <list>     仅分析指定版本，逗号分隔
                            例如: 5.8.32,5.8.33
     --auto-fix-submit     分析后自动检查 target branch 是否已修复，并仅在真实代码修改时自动提交 Gerrit
+    --no-auto-fix-submit  本次运行显式关闭自动修复/提交
     --target-branch <br>  自动修复提交目标分支（默认: origin/develop/eagle）
     --reviewer <email>    自动提交时附加 reviewer，可多次指定
     --max-crashes <n>     单版本最大分析崩溃数（默认: 0，分析全部）
-    --addr2line-max-frames <n>  addr2line 最大解析帧数（默认: 300）
+    --addr2line-max-frames <n>  addr2line 最大解析帧数（默认: 500）
     --workspace <dir>      工作目录（默认: 自动创建带时间戳的目录 ~/coredump-workspace-YYYYMMDD-HHMMSS）
     --help, -h            显示此帮助信息
 
@@ -258,6 +320,10 @@ parse_args() {
                 ;;
             --auto-fix-submit)
                 AUTO_FIX_SUBMIT=true
+                shift
+                ;;
+            --no-auto-fix-submit)
+                AUTO_FIX_SUBMIT=false
                 shift
                 ;;
             --target-branch)
@@ -564,6 +630,12 @@ download_source_for_version() {
 
     echo -e "${YELLOW}━━━ 步骤3: 切换代码到 $version (项目: $gerrit_project) ━━━${NC}"
 
+    if [[ "$ENABLE_CODE_MANAGEMENT" != "true" ]]; then
+        echo -e "${YELLOW}⚠️ 代码管理已通过配置关闭，跳过源码克隆/切换${NC}"
+        set_step_result "skipped_disabled" "code management disabled by config"
+        return 0
+    fi
+
     # 检查本地是否已有该版本的源码
     local repo_dir="$WORKSPACE/3.代码管理/$gerrit_project"
     if [[ -d "$repo_dir/.git" ]]; then
@@ -604,6 +676,12 @@ download_packages_for_version() {
     fi
 
     echo -e "${YELLOW}━━━ 步骤4: 下载 $version 的包 ━━━${NC}"
+
+    if [[ "$ENABLE_PACKAGE_MANAGEMENT" != "true" ]]; then
+        echo -e "${YELLOW}⚠️ 包管理已通过配置关闭，跳过 deb/dbgsym 下载${NC}"
+        set_step_result "skipped_disabled" "package management disabled by config"
+        return 0
+    fi
 
     # 创建下载目录
     mkdir -p "$dl_dir"
@@ -726,7 +804,9 @@ analyze_crashes_for_version() {
     local clean_version=$(echo "$version" | sed 's/^1://' | sed 's/-1$//')
 
     # 检查是否该版本被跳过（deb包不存在）
-    if [[ -f "$skip_file" ]] && grep -q "^$package $clean_version" "$skip_file" 2>/dev/null; then
+    if [[ "$ENABLE_PACKAGE_MANAGEMENT" != "true" ]]; then
+        echo -e "${YELLOW}⚠️ 包管理已通过配置关闭，跳过 deb/dbgsym 安装，直接分析${NC}"
+    elif [[ -f "$skip_file" ]] && grep -q "^$package $clean_version" "$skip_file" 2>/dev/null; then
         echo -e "${YELLOW}⚠️ 该版本 deb 包不存在，跳过安装，直接使用 AI 分析${NC}"
     else
         # 安装该版本的 deb 包（包括调试符号包 dbgsym）
@@ -1008,13 +1088,17 @@ main() {
     # 1. 解析命令行参数
     parse_args "$@"
 
-    # 2. 检查配置完整性
+    # 2. 加载流程开关配置（数据筛选为必需步骤，不提供关闭开关）
+    load_workflow_config
+    echo -e "${BLUE}流程配置:${NC} config=$ANALYSIS_CONFIG_FILE, code_management=$ENABLE_CODE_MANAGEMENT, package_management=$ENABLE_PACKAGE_MANAGEMENT, auto_fix_submit=$AUTO_FIX_SUBMIT, max_crashes=$MAX_CRASHES, addr2line_max_frames=$ADDR2LINE_MAX_FRAMES"
+
+    # 3. 检查配置完整性
     check_config
 
-    # 3. 检查依赖
+    # 4. 检查依赖
     check_dependencies
 
-    # 4. 创建工作目录
+    # 5. 创建工作目录
     setup_workspace
     init_status_files
 

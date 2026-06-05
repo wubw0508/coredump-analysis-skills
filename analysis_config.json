@@ -1,0 +1,19 @@
+{
+  "_comment": "崩溃分析统一配置。数据筛选是必需步骤，不提供关闭开关。命令行参数和环境变量可临时覆盖本文件。",
+  "workflow": {
+    "_comment": "流程步骤开关配置。true 表示执行该步骤，false 表示跳过该步骤并继续后续分析。",
+    "enable_code_management": true,
+    "enable_code_management_comment": "控制步骤3：代码管理。true 时克隆/切换 Gerrit 源码到崩溃版本；false 时跳过源码克隆/切换，崩溃分析继续执行，但源码上下文、git blame/log 等增强分析能力会降级。",
+    "enable_package_management": true,
+    "enable_package_management_comment": "控制步骤4：包管理。true 时下载并安装对应版本 deb/dbgsym 包；false 时跳过 deb/dbgsym 下载和安装，崩溃分析继续执行，但符号解析和源码定位能力可能下降。",
+    "enable_auto_fix_submit": true,
+    "enable_auto_fix_submit_comment": "控制自动修复/提交默认行为。true 时分析后执行自动修复检查并仅提交真实代码修改；false 时默认不执行自动修复/提交。可通过 AUTO_FIX_SUBMIT、--auto-fix-submit、--no-auto-fix-submit 临时覆盖。"
+  },
+  "analysis": {
+    "_comment": "崩溃分析深度配置。命令行参数和环境变量优先级高于本配置。",
+    "max_crashes": 0,
+    "max_crashes_comment": "单版本最大分析崩溃数量。0 表示分析该版本全部去重后的崩溃；大于 0 时只分析前 N 个崩溃。可通过 MAX_CRASHES 或 --max-crashes 临时覆盖。",
+    "addr2line_max_frames": 500,
+    "addr2line_max_frames_comment": "增强分析中 addr2line 最多解析的栈帧数量。数值越大分析越深但耗时越长。当前默认值：500。可通过 ADDR2LINE_MAX_FRAMES 或 --addr2line-max-frames 临时覆盖。"
+  }
+}

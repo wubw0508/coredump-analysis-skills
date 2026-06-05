@@ -29,13 +29,18 @@ SYS_VERSION="1070-1075"
 SKILLS_DIR="${SKILLS_DIR:-$SCRIPT_DIR}"
 PACKAGES_FILE="$SKILLS_DIR/packages.txt"
 LOAD_ACCOUNTS_SCRIPT="$SKILLS_DIR/coredump-full-analysis/scripts/load_accounts.sh"
+ANALYSIS_CONFIG_FILE="${ANALYSIS_CONFIG_FILE:-$SKILLS_DIR/analysis_config.json}"
 
 ARCH="amd64"  # 默认使用 amd64 架构
 WORKSPACE=""
 RUN_BACKGROUND=false
 PROGRESS_INTERVAL=0  # 0表示禁用进度监控，非0表示启用(秒)
 DEFAULT_PROGRESS_INTERVAL=180
-AUTO_FIX_SUBMIT="${AUTO_FIX_SUBMIT:-true}"
+ENABLE_CODE_MANAGEMENT="${ENABLE_CODE_MANAGEMENT:-}"
+ENABLE_PACKAGE_MANAGEMENT="${ENABLE_PACKAGE_MANAGEMENT:-}"
+AUTO_FIX_SUBMIT="${AUTO_FIX_SUBMIT:-}"
+MAX_CRASHES="${MAX_CRASHES:-}"
+ADDR2LINE_MAX_FRAMES="${ADDR2LINE_MAX_FRAMES:-}"
 DEFAULT_TARGET_BRANCH="origin/develop/eagle"
 TARGET_BRANCH=""  # 命令行指定时覆盖默认值
 REVIEWERS=()
@@ -62,8 +67,9 @@ ${GREEN}用法:${NC}
 
 ${GREEN}默认行为:${NC}
     - 不指定 --packages 时：自动从 packages.txt 读取当前启用的 24 个默认项目
-    - --auto-fix-submit 当前默认已开启（仅真实代码修改可提交 Gerrit）
-    - 可通过环境变量关闭自动修复/提交：AUTO_FIX_SUBMIT=false bash run_analysis_agent.sh ...
+    - 流程开关和崩溃分析层数默认读取 analysis_config.json（数据筛选必做，代码管理/包管理/自动修复提交可配置）
+    - 分析层数默认：max_crashes=0（全部），addr2line_max_frames=500
+    - --auto-fix-submit 仅提交真实代码修改；可通过 AUTO_FIX_SUBMIT=false 或 --no-auto-fix-submit 临时关闭
     - --progress 不带数值时，默认使用 ${DEFAULT_PROGRESS_INTERVAL} 秒
 
 ${GREEN}必需参数:${NC}
@@ -86,7 +92,8 @@ ${GREEN}可选参数:${NC}
     --progress [秒]       启用进度监控；不带值时默认 ${DEFAULT_PROGRESS_INTERVAL} 秒
     --interval <秒>       进度报告间隔 (默认: ${DEFAULT_PROGRESS_INTERVAL} 秒)
     --auto-fix-submit     分析后自动检查 target branch 是否已修复，并仅在真实代码修改时自动提交 Gerrit
-                           （Agent 默认已开启，也可通过环境变量 AUTO_FIX_SUBMIT=false 关闭）
+                           （默认读取 analysis_config.json，也可通过环境变量 AUTO_FIX_SUBMIT=false 关闭）
+    --no-auto-fix-submit  本次运行显式关闭自动修复/提交
     --target-branch <br>  强制所有包使用同一分支 (覆盖 packages.txt 中的配置)
     --reviewer <email>    自动提交时附加 reviewer，可多次指定
     --no-gerrit-web-report      禁用分析结束后的 Gerrit 网页报告生成
@@ -167,6 +174,64 @@ is_integer() {
     [[ "$1" =~ ^[0-9]+$ ]]
 }
 
+normalize_bool() {
+    local value="$1"
+    local default_value="${2:-true}"
+    case "${value,,}" in
+        true|1|yes|y|on|enable|enabled) echo "true" ;;
+        false|0|no|n|off|disable|disabled) echo "false" ;;
+        *) echo "$default_value" ;;
+    esac
+}
+
+read_config_bool() {
+    local jq_path="$1"
+    local default_value="$2"
+    if [[ -f "$ANALYSIS_CONFIG_FILE" ]] && command -v jq &> /dev/null; then
+        local value
+        value=$(jq -r "$jq_path // empty" "$ANALYSIS_CONFIG_FILE" 2>/dev/null || true)
+        if [[ -n "$value" && "$value" != "null" ]]; then
+            normalize_bool "$value" "$default_value"
+            return 0
+        fi
+    fi
+    echo "$default_value"
+}
+
+read_config_int() {
+    local jq_path="$1"
+    local default_value="$2"
+    if [[ -f "$ANALYSIS_CONFIG_FILE" ]] && command -v jq &> /dev/null; then
+        local value
+        value=$(jq -r "$jq_path // empty" "$ANALYSIS_CONFIG_FILE" 2>/dev/null || true)
+        if [[ "$value" =~ ^[0-9]+$ ]]; then
+            echo "$value"
+            return 0
+        fi
+    fi
+    echo "$default_value"
+}
+
+load_workflow_config() {
+    local config_code_management
+    local config_package_management
+    local config_auto_fix_submit
+    local config_max_crashes
+    local config_addr2line_max_frames
+
+    config_code_management=$(read_config_bool '.workflow.enable_code_management' true)
+    config_package_management=$(read_config_bool '.workflow.enable_package_management' true)
+    config_auto_fix_submit=$(read_config_bool '.workflow.enable_auto_fix_submit' true)
+    config_max_crashes=$(read_config_int '.analysis.max_crashes' 0)
+    config_addr2line_max_frames=$(read_config_int '.analysis.addr2line_max_frames' 500)
+
+    ENABLE_CODE_MANAGEMENT=$(normalize_bool "${ENABLE_CODE_MANAGEMENT:-$config_code_management}" "$config_code_management")
+    ENABLE_PACKAGE_MANAGEMENT=$(normalize_bool "${ENABLE_PACKAGE_MANAGEMENT:-$config_package_management}" "$config_package_management")
+    AUTO_FIX_SUBMIT=$(normalize_bool "${AUTO_FIX_SUBMIT:-$config_auto_fix_submit}" "$config_auto_fix_submit")
+    MAX_CRASHES="${MAX_CRASHES:-$config_max_crashes}"
+    ADDR2LINE_MAX_FRAMES="${ADDR2LINE_MAX_FRAMES:-$config_addr2line_max_frames}"
+}
+
 # 解析参数
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -233,6 +298,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --auto-fix-submit)
             AUTO_FIX_SUBMIT=true
+            shift
+            ;;
+        --no-auto-fix-submit)
+            AUTO_FIX_SUBMIT=false
             shift
             ;;
         --target-branch)
@@ -412,6 +481,9 @@ print_non_default_mappings() {
     echo ""
 }
 
+# 加载流程开关配置（数据筛选为必需步骤，不提供关闭开关）
+load_workflow_config
+
 # 验证必需参数
 load_default_packages_if_needed
 build_package_array
@@ -455,7 +527,12 @@ echo "  工作目录: $WORKSPACE"
 if [[ "$PROGRESS_INTERVAL" -gt 0 ]]; then
     echo "  进度监控: ${PROGRESS_INTERVAL}秒"
 fi
+echo "  流程配置文件: $ANALYSIS_CONFIG_FILE"
+echo "  代码管理: $ENABLE_CODE_MANAGEMENT"
+echo "  包管理: $ENABLE_PACKAGE_MANAGEMENT"
 echo "  自动修复提交: $AUTO_FIX_SUBMIT"
+echo "  单版本最大分析崩溃数: $MAX_CRASHES"
+echo "  addr2line最大解析帧数: $ADDR2LINE_MAX_FRAMES"
 echo "  默认分支: $DEFAULT_TARGET_BRANCH"
 echo "  Gerrit网页报告: $GENERATE_GERRIT_WEB_REPORT"
 echo "  Gerrit网页服务: $SERVE_GERRIT_WEB_REPORT"
@@ -731,15 +808,18 @@ launch_package() {
         --arch "$ARCH"
         --sys-version "$SYS_VERSION"
         --workspace "$WORKSPACE"
-        --target-branch "$pkg_branch")
+        --target-branch "$pkg_branch"
+        --max-crashes "$MAX_CRASHES"
+        --addr2line-max-frames "$ADDR2LINE_MAX_FRAMES")
     [[ -n "$START_DATE" ]] && cmd+=(--start-date "$START_DATE")
     [[ -n "$END_DATE" ]] && cmd+=(--end-date "$END_DATE")
     [[ "$AUTO_FIX_SUBMIT" == "true" ]] && cmd+=(--auto-fix-submit)
+    [[ "$AUTO_FIX_SUBMIT" != "true" ]] && cmd+=(--no-auto-fix-submit)
     local reviewer
     for reviewer in "${REVIEWERS[@]}"; do
         cmd+=(--reviewer "$reviewer")
     done
-    if SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" "${cmd[@]}" 2>&1; then
+    if SUDO_PASSWORD="$SUDO_PASSWORD" PROGRESS_INTERVAL="$PROGRESS_INTERVAL" ANALYSIS_CONFIG_FILE="$ANALYSIS_CONFIG_FILE" ENABLE_CODE_MANAGEMENT="$ENABLE_CODE_MANAGEMENT" ENABLE_PACKAGE_MANAGEMENT="$ENABLE_PACKAGE_MANAGEMENT" AUTO_FIX_SUBMIT="$AUTO_FIX_SUBMIT" MAX_CRASHES="$MAX_CRASHES" ADDR2LINE_MAX_FRAMES="$ADDR2LINE_MAX_FRAMES" "${cmd[@]}" 2>&1; then
         # 如果启用了自动修复提交，调用修复映射脚本
         if [[ "$AUTO_FIX_SUBMIT" == "true" ]]; then
             echo -e "${YELLOW}开始修复映射和Gerrit提交 (项目: $pkg_project, 分支: $pkg_branch)...${NC}"
