@@ -1,233 +1,92 @@
 # Auto-Fix Pipeline Architecture & Coverage
 
-Analysis of `auto_fix_submit.py`, `cluster_crashes.py`, and the package fixer modules. Captures what currently produces real Gerrit commits, what only produces analysis-report fallback commits, and where the dispatcher still has coverage gaps.
+Use this reference when changing or interpreting `auto_fix_submit.py`, cluster fixers, spec fixers, analysis-report fallback, or Gerrit auto-fix metrics.
 
-## Pipeline Flow
+## Dispatcher model
 
-```text
-analyze_crash_complete.sh (step 6)
-  └─ auto_fix_submit.py --package X --version V --workspace W
-       │
-       ├─ Has cluster fixer? (fixers/<pkg>.py with build_fix_plan_for_cluster + apply_fix_plan)
-       │   ├─ YES → run_cluster_auto_fix()
-       │   │         ├─ cluster_crashes(package, crashes) → list of CrashCluster
-       │   │         ├─ For each cluster:
-       │   │         │   ├─ build_fix_plan_for_cluster(cluster) → FixPlan
-       │   │         │   ├─ apply_fix_plan(code_dir, plan) → FixResult
-       │   │         │   │   ├─ is_fix_present() → if already fixed locally, skip edit
-       │   │         │   │   └─ apply_<action>() or record_conservative_analysis_only()
-       │   │         │   ├─ If FixResult.changed → create_commit(build_cluster_commit_message(...))
-       │   │         │   └─ If !changed → record as analysis_only
-       │   │         ├─ If any cluster commit was created → push_to_gerrit()
-       │   │         ├─ If no cluster produced code changes but fixable clusters exist:
-       │   │         │     generate coredump-analysis-report.md → commit → push_to_gerrit
-       │   │         └─ Save auto_fix_clusters_result.json
-       │   │
-       │   └─ NO → spec-based path
-       │             ├─ get_fix_specs(package) → {pattern: spec, ...}
-       │             ├─ For each fixable crash:
-       │             │   ├─ resolve_fix_spec_for_crash(specs, crash)
-       │             │   ├─ Check fixed_commits against target branch
-       │             │   ├─ If already fixed → already_fixed
-       │             │   ├─ If has auto_fixer=cherry_pick_known_fix → queue preferred commit
-       │             │   └─ Else → manual_required
-       │             ├─ Cherry-pick unique preferred commits → push_to_gerrit
-       │             ├─ If no auto-fix applied but fixable crashes exist:
-       │             │     generate coredump-analysis-report.md → commit → push_to_gerrit
-       │             └─ Save auto_fix_result.json
-       │
-       └─ Result:
-            cluster path → {auto_fixed, analysis_only, submitted, analysis_report?}
-            spec path    → {already_fixed, auto_fixed, manual_required, submitted, analysis_report?}
-```
+`auto_fix_submit.py` has two mutually exclusive normal paths:
 
-## Dispatcher Gate: Cluster Path Wins First
+1. Cluster path: package has both `build_fix_plan_for_cluster` and `apply_fix_plan` in `fixers/<pkg>.py`.
+   - `cluster_crashes(package, crashes)` creates cluster buckets.
+   - `build_fix_plan_for_cluster(cluster)` returns a `FixPlan`.
+   - `apply_fix_plan(code_dir, plan)` may create a deterministic source edit, skip if already fixed, or record conservative analysis-only.
+   - If any cluster creates code changes, commits are pushed to Gerrit.
+   - If no safe code edit exists but fixable clusters remain, analysis-report fallback may create/push `coredump-analysis-report.md`.
+   - After cluster handling, `main()` returns; the spec path is not run for that package in the same invocation.
 
-This is the most important current behavior in `auto_fix_submit.py`:
+2. Spec path: package has no cluster fixer entrypoints and relies on `get_fix_specs()`.
+   - Matched specs may mark already-fixed crashes, queue `cherry_pick_known_fix`, or require manual work.
+   - If no code edit/cherry-pick is applied but fixable crashes remain, analysis-report fallback may create/push `coredump-analysis-report.md`.
 
-- if a package has both `get_package_fix_plan_builder(package)` and `get_package_fix_applier(package)`, the script enters `run_cluster_auto_fix(...)`
-- after the cluster path finishes, `main()` returns immediately
-- the spec-based path below it is not executed for that package in the same run
+Important consequence: for packages with cluster fixers, any existing `get_fix_specs()` metadata is normally bypassed by the dispatcher.
 
-Practical consequence:
-- packages with cluster fixers do not currently benefit from `get_fix_specs()` inside the normal `auto_fix_submit.py` dispatcher
-- `dde-launcher` still defines a substantial `get_fix_specs()` table, but its normal automation path is currently the cluster path, not the spec path
+## Current effective coverage
 
-So when evaluating effective coverage, distinguish between:
-- metadata that exists in fixer modules
-- behavior that is actually reachable through the current dispatcher
-
-## Two Execution Modes
-
-### Path A: Cluster-Level Fixers
-
-Packages with `fixers/<pkg>.py` exporting both `build_fix_plan_for_cluster` and `apply_fix_plan` use deterministic cluster handling.
+`cluster_crashes.py` currently defines **24 deterministic cluster rules**. Coverage families include D-Bus lifecycle, Qt object lifetime/event-loop, X11/XCB, updater watcher cleanup, qsocketnotifier/qscroller/qmenu/qhash/pixmap-cache, atspi/native-event-filter, and deepin platform plugin crashes.
 
 Current cluster-fixer packages:
-- `dde-dock`
-- `dde-launcher`
-- `dde-control-center`
-- `dde-clipboard`
-- `dde-polkit-agent`
-- `startdde`
 
-`cluster_crashes.py` classifies crashes with `KNOWN_CLUSTER_RULES`, then falls back to a generated key like `<signal>-<symbol>` for unmatched cases.
+| Package | Effective behavior |
+|---------|--------------------|
+| `dde-dock` | 6 concrete code-changing cluster fix plans + conservative fallback |
+| `dde-launcher` | cluster path is conservative analysis-only; large `get_fix_specs()` table exists but is bypassed while cluster entrypoints exist |
+| `dde-control-center` | 2 explicit updater watcher code-changing entries converging to one edit action + conservative fallback |
+| `dde-clipboard` | conservative analysis-only |
+| `dde-polkit-agent` | conservative analysis-only |
+| `startdde` | conservative analysis-only |
+| other packages | no cluster fixer; depend on package-specific spec rules, usually narrow/absent |
 
-### Path B: Spec-Level Fixers
+Nuances:
+- `dde_dock.py` maps 6 cluster keys to edits: appitem DBus property read, pluginlistview qscroller dtor, dock context menu qwindow dtor, xrecord X11 IO error, dock application notify cast, and speed plugin update tip.
+- `dde_control_center.py` has explicit updater watcher keys for code-changing cleanup plus conservative dmainwindow/dbus/wallpaper entries.
+- `cluster_crashes.py` also has `updater-dbus-pending-watchers-wide`; it needs an explicit fixer mapping before it reuses updater watcher cleanup.
+- `dde_launcher.py` has substantial spec knowledge, but normal runs use conservative cluster analysis while cluster entrypoints remain present.
 
-Packages without a cluster fixer use `get_fix_specs()`.
+## Gerrit interpretation rules
 
-Current state:
-- `fixers/common.py:get_fix_specs()` returns `{}`
-- most packages still have no package-specific spec rules
-- this path only becomes effective when a package does not hit the cluster-fixer gate and also provides explicit spec rules
-- today this is a relatively narrow path compared with cluster handling
+All crash-analysis-related Gerrit commit subjects should include `[coredump-analysis]`.
 
-## Current Fixer Coverage
+Do not treat every Gerrit submission as a real crash fix:
 
-### Cluster Rules
+- real code fix = commit changes package source files or cherry-picks a known source-code fix
+- analysis-report fallback = `coredump-analysis-report.md` traceability artifact for human follow-up
+- Markdown-only `auto-fix/*` branch = not a real source-code fix candidate
 
-`cluster_crashes.py` currently defines **24 deterministic cluster rules**.
+When reporting solved crashes or fix coverage, separate:
+- code edits applied
+- cherry-picks applied
+- analysis-report fallback submissions
+- analysis-only / manual-only local results
 
-Coverage areas include:
-- D-Bus lifecycle crashes
-- Qt object lifetime / event-loop crashes
-- X11/XCB connection crashes
-- updater watcher cleanup families
-- qsocketnotifier / qscroller / qmenu / qhash / pixmap-cache families
-- atspi / native-event-filter / deepin platform plugin related crashes
+## Why "fixable" may not become "auto_fixed"
 
-### Package Coverage Snapshot
+Common causes:
 
-| Package | Has Cluster Fixer | Effective Current Behavior |
-|---------|-------------------|----------------------------|
-| dde-dock | Yes | 6 concrete code-changing fix plans + conservative fallback |
-| dde-launcher | Yes | Cluster path is conservative analysis-only; `get_fix_specs()` exists but is not used by the normal dispatcher while cluster fixer entry points are present |
-| dde-control-center | Yes | 2 explicit code-changing plan entries that converge to one edit action + conservative fallback |
-| dde-clipboard | Yes | Conservative analysis-only for all clusters |
-| dde-polkit-agent | Yes | Conservative analysis-only for all clusters |
-| startdde | Yes | Conservative analysis-only for all clusters |
-| Other packages | No | Depend on spec path; most currently have no registered fix specs |
+1. crash matched a cluster rule whose package fixer is conservative-only
+2. package has cluster entrypoints, so `get_fix_specs()` is bypassed
+3. package reaches spec path but has no useful `get_fix_specs()`
+4. spec exists but has no supported auto fixer
+5. cherry-pick candidate is missing, already applied, or conflicts
+6. root cause is actionable, but no safe deterministic source edit is known
 
-### Concrete Cluster Fixers
+Interpretation: `fixable` means likely actionable root cause; `auto_fixed` means safe deterministic code edit or successful cherry-pick actually happened.
 
-#### dde-dock
+## Coverage gap snapshot
 
-`fixers/dde_dock.py` currently maps 6 cluster keys to code edits:
-1. `appitem-dbus-property-read`
-2. `pluginlistview-qscroller-dtor`
-3. `dock-context-menu-qwindow-dtor`
-4. `xrecord-x11-io-error`
-5. `dock-application-notify-cast`
-6. `speed-plugin-update-tip`
+A recent audit found **127 matched / 866 unmatched** crash records under the current deterministic rule set. Treat this as directional, not permanent; rerun the audit after changing `KNOWN_CLUSTER_RULES` or package fixers.
 
-Unmatched dock clusters fall back to `record_conservative_analysis_only`.
+Highest-value expansion directions:
 
-#### dde-control-center
+1. decide whether cluster-fixer packages such as `dde-launcher` should also consume spec rules after conservative cluster handling
+2. add an explicit mapping for `updater-dbus-pending-watchers-wide` if it should reuse updater watcher cleanup
+3. add package-specific spec rules for packages with neither cluster fixers nor useful specs
+4. convert repeated conservative cluster families into safe mechanical fixers only after source ownership/edit points are verified
+5. keep metrics split by code edits, cherry-picks, analysis-report fallback, and analysis/manual-only results
 
-`fixers/dde_control_center.py` currently has 5 explicit cluster entries:
-- `updater-dbus-pending-watchers-crash` → code-changing fixer
-- `updater-dbus-watchers-dtor` → code-changing fixer
-- `dmainwindow-dtor-crash` → conservative
-- `dbus-disconnect-notify-crash` → conservative
-- `wallpaper-provider-dtor` → conservative
-
-Both updater watcher keys converge to the same edit action: `apply_updater_dbus_watcher_cleanup`.
-
-Important nuance:
-- `cluster_crashes.py` also defines a broad cluster key named `updater-dbus-pending-watchers-wide`
-- that key name does not currently have a dedicated explicit entry in `fixers/dde_control_center.py`
-- therefore it falls through to the package default conservative fallback unless the crash also matches one of the explicitly handled updater keys
-
-#### dde-launcher
-
-`fixers/dde_launcher.py` exports both cluster plans and a large `get_fix_specs()` table, but under the current dispatcher these serve uneven roles:
-
-- cluster plans are the effective path in normal runs
-- those cluster plans are intentionally conservative for Qt/libdbus/XCB/system-library crashes
-- `get_fix_specs()` contains many `cherry_pick_known_fix` mappings for known upstream fixes
-- however those spec mappings are not normally reached while the package still satisfies the cluster-fixer gate in `auto_fix_submit.py`
-
-So the codebase contains launcher spec knowledge, but the normal dispatcher currently behaves as conservative cluster analysis plus analysis-report fallback.
-
-#### Conservative-Only Packages
-
-`dde-clipboard`, `dde-polkit-agent`, and `startdde` currently route every cluster to `record_conservative_analysis_only` because known fixable crashes are considered to occur in system libraries or lack a safe application-layer edit point.
-
-## Gerrit Submission Rule
-
-当前规则已经收紧为：只有真实代码修改才允许自动提交 Gerrit。
-
-允许自动提交的情况：
-1. cluster path 产生了真实源码改动，并成功生成代码提交
-2. spec path 成功 cherry-pick 了代码提交
-
-不允许自动提交的情况：
-1. `auto_fixed` 为空且只有 `analysis_only`
-2. `auto_fixed` 为空且只有 `manual_required`
-3. 仅生成分析文件 / 说明文档（如 `coredump-analysis-report.md`）
-
-这意味着 fixable-but-non-mechanical crashes 仍然会保留本地分析结果供人工跟进，但不会再自动产出 Gerrit 说明文档提交。
-
-## Gerrit Commit Subject Rule
-
-All crash-analysis-related Gerrit commit subjects should carry the `[coredump-analysis]` prefix.
-
-Verified current behavior:
-- cluster-fixer `FixPlan.commit_subject` values in
-  - `fixers/dde_dock.py`
-  - `fixers/dde_launcher.py`
-  - `fixers/dde_control_center.py`
-  - `fixers/dde_clipboard.py`
-  - `fixers/dde_polkit_agent.py`
-  - `fixers/startdde.py`
-  all include `[coredump-analysis]`
-
-Important distinction:
-- `generate_gerrit_web_report.py` only reads and displays `commit_subject`; it does not generate commit titles itself
-
-## Why "Fixable" May Still Not Mean "Auto-Patched"
-
-Common reasons:
-1. crash matched a cluster rule, but that cluster only has conservative handling
-2. crash reached a package with a cluster fixer, so package `get_fix_specs()` metadata was bypassed by the dispatcher
-3. crash reached the spec path, but no package `get_fix_specs()` exists
-4. spec exists, but no supported `auto_fixer` was registered for the matched case
-5. spec exists with `cherry_pick_known_fix`, but preferred commit is absent or cherry-pick conflicts
-6. crash is fixable at analysis level, but a safe local source edit cannot be determined automatically
-
-So the current system should be understood as:
-- `fixable` = likely actionable root cause
-- `auto_fixed` = a safe deterministic code edit or successful cherry-pick action exists
-- otherwise = keep local analysis output for human follow-up, but do not auto-submit Gerrit
-
-## Coverage Gap Framing
-
-Do not treat "generated Gerrit change" as a single bucket.
-
-Current interpretation should distinguish:
-- real code-changing auto-fix commits
-- cherry-pick based auto-fix commits
-- local-only analysis/manual results that did not submit Gerrit
-
-A package may still produce useful local analysis output even when every cluster is conservative, but that does not mean a real source-code crash fix was submitted.
-
-## Highest-Value Expansion Directions
-
-1. decide whether cluster-fixer packages such as `dde-launcher` should also be allowed to consume `get_fix_specs()` in the normal dispatcher
-2. add an explicit mapping for `updater-dbus-pending-watchers-wide` if it is intended to reuse the updater watcher cleanup path
-3. expand package-specific `get_fix_specs()` for packages that currently have neither cluster fixers nor usable spec rules
-4. convert repeated conservative cluster families into safe mechanical fixers where source edit points become stable
-5. continue growing `KNOWN_CLUSTER_RULES` so more crashes land in meaningful root-cause buckets
-6. keep reporting/metrics separated into:
-   - code edits applied
-   - cherry-picks applied
-   - analysis-only / manual-only local results
-
-## Detection Commands
+## Detection commands
 
 ```bash
-# Check cluster rule count
+# Count cluster rules
 python3 - <<'PY'
 import ast, pathlib
 p = pathlib.Path('coredump-full-analysis/scripts/cluster_crashes.py')
@@ -239,16 +98,23 @@ for node in mod.body:
                 print(len(node.value.elts))
 PY
 
-# Inspect whether a package has cluster fixer entry points
-grep -n 'build_fix_plan_for_cluster\|apply_fix_plan\|get_fix_specs' \
-  coredump-full-analysis/scripts/fixers/*.py
+# Inspect package fixer entrypoints
+python3 - <<'PY'
+from pathlib import Path
+for p in sorted(Path('coredump-full-analysis/scripts/fixers').glob('*.py')):
+    text = p.read_text(encoding='utf-8')
+    hits = [name for name in ['build_fix_plan_for_cluster', 'apply_fix_plan', 'get_fix_specs'] if name in text]
+    if hits:
+        print(p.name, ','.join(hits))
+PY
 
-# Check whether analysis report fallback exists
-grep -n 'coredump-analysis-report\|analysis_report' \
-  coredump-full-analysis/scripts/auto_fix_submit.py
-
-# Check current commit-subject prefix coverage
-grep -RFn '\[coredump-analysis\]' \
-  coredump-full-analysis/scripts/fixers \
-  coredump-full-analysis/scripts/auto_fix_submit.py
+# Check fallback/report subject references
+python3 - <<'PY'
+from pathlib import Path
+for p in [Path('coredump-full-analysis/scripts/auto_fix_submit.py'), Path('coredump-full-analysis/scripts/deep_auto_fix.py')]:
+    text = p.read_text(encoding='utf-8', errors='replace')
+    for token in ['coredump-analysis-report', 'analysis_report', '[coredump-analysis]']:
+        if token in text:
+            print(p, token)
+PY
 ```

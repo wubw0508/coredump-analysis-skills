@@ -92,7 +92,7 @@ run_analysis_window() {
         cmd+=(--packages "$ANALYSIS_PACKAGES")
     fi
 
-    AUTO_FIX_SUBMIT=false "${cmd[@]}"
+    AUTO_FIX_SUBMIT=true "${cmd[@]}"
 }
 
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-$HOME}"

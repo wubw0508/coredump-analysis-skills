@@ -1,143 +1,78 @@
-# Enhanced Analysis — Techniques, Pitfalls & Design Decisions
+# Enhanced Analysis
 
-Detailed reference for `coredump-full-analysis/scripts/enhanced_analysis.py` and its integration.
+Use this reference when maintaining `coredump-full-analysis/scripts/enhanced_analysis.py` or interpreting shallow/partial enhanced-analysis output.
 
-## 1. Addr2Line Resolution
+## Core behavior
 
-### DWARF Corruption (UOS Universal Problem)
+Enhanced analysis enriches base GDB stack results with:
 
-UOS dbgsym packages have **corrupted DWARF debug sections**. Every addr2line invocation against a UOS dbgsym produces:
+- addr2line / demangling
+- source-file lookup and surrounding source context
+- git blame/log for resolved source frames
+- objdump around the crash instruction when a key frame is known
+- optional debuginfod lookup for system-library build-ids
+- optional LLM stack reasoning after deterministic passes
 
-```
+It should degrade visibly, not silently. When a stage cannot run, record a structured reason and keep the base crash analysis usable.
+
+## UOS addr2line reality
+
+UOS dbgsym packages often have corrupted DWARF sections. Typical error:
+
+```text
 addr2line: DWARF error: section .debug_info is larger than its filesize!
 ```
 
-This means addr2line can demangle the function name but **cannot resolve file:line**. The output becomes:
-```
-func_name 于 ??:?
-```
+Practical effect:
 
-### Chinese Locale Handling
+- addr2line may demangle function names but return `??:?`
+- Chinese locale may output `于 ??:?`; parsers must handle both `at` and `于`
+- `partial_with_source` is valuable and should not be treated as total failure
 
-On UOS systems, addr2line outputs Chinese locale:
-- `于 ??:?` instead of `at ??:?`
-- The parser must handle both. In `enhanced_analysis.py`, the regex matches `于` as a separator.
+Fallback strategy:
 
-### Partial Resolution Workaround
+1. demangle and prefer qualified names such as `PluginListView::rowsInserted`
+2. search source by qualified name before simple method name
+3. prefer `.cpp` definitions over `.h` declarations
+4. read source context around the match
+5. allow source-based fixability heuristics to run on `partial_with_source`
 
-When addr2line returns only a function name (no file:line), the system falls back to **source code search**:
+Set `LC_ALL=C` for `find`/shell source scans to avoid garbled UOS locale errors.
 
-1. Demangle the function name to get the qualified name (e.g., `PluginListView::rowsInserted`)
-2. Search the source repo for that exact qualified name using grep
-3. **Priority order**: `.cpp` definition files > `.h` header files
-4. Read surrounding source context from the matched file
-5. Mark frame as `partial_with_source` instead of just `partial`
+## Binary and frame resolution
 
-### Source Search Strategy
+Binary lookup order:
 
-Always search the **qualified name** first (e.g., `PluginListView::rowsInserted`), not just the method name (`rowsInserted`). A simple method name matches too many files — headers, tests, mocks, unrelated classes.
+1. exact stack-frame path
+2. standard library paths such as `/usr/lib/` and `/usr/lib/x86_64-linux-gnu/`
+3. DDE plugin directories such as `/usr/lib/dde-dock/plugins/`, `/usr/lib/dde-control-center/plugins/`, `/usr/lib/dde-launcher/plugins/`
+4. build-id debug files under `/usr/lib/debug/.build-id/xx/yyyy.debug`
+5. debuginfod if a build-id exists
 
-```python
-# WRONG: simple grep for function name alone
-# "rowsInserted" matches too many files (headers, tests, mocks)
+Stack frame parser expects shapes like:
 
-# RIGHT: search qualified name first
-grep -rn "PluginListView::rowsInserted" source_dir/
-
-# Then try class-only if qualified name finds nothing
-grep -rn "rowsInserted" source_dir/ --include="*.cpp"
+```text
+#0 0x7f8a1b2c3d4e symbol_name (libname.so + 0xOFFSET)
 ```
 
-**Key decision**: Always prefer `.cpp` over `.h`. A function defined in a `.cpp` file is more useful for blame/context than a declaration in a header.
+Offset drives addr2line: `addr2line -e <binary> -C -f <hex_offset>`.
 
-### find(1) Locale Pitfall
+## Deep-stack policy
 
-Running `find` with `-type f` on UOS with non-C locale produces garbled error messages. Fix:
+Enhanced addr2line is configurable with `--addr2line-max-frames`; current default is `300`. Automatic deep dive expands to at least `600` frames.
 
-```python
-env = os.environ.copy()
-env['LC_ALL'] = 'C'  # Must set for find commands
-```
+Use wider windows when app-layer frames are buried below Qt/GLib/signal/event-loop wrappers, or when the first frames are all framework/system code.
 
-## 2. Binary File Resolution
+Automatic second-pass deep dive should run when any of these are true:
 
-### Search Order
+- `fixable == uncertain`
+- app-layer signal exists (`app_layer_symbol`, package-owned key-frame symbol, or package-owned key-frame library)
+- crash count is high enough, currently `count >= 3`
 
-`BinaryResolver` looks for library files in this order:
+## Degradation reasons to surface
 
-1. Exact path from stack frame (e.g., `/usr/lib/dde-dock/plugins/libeye-comfort-mode.so`)
-2. Standard system paths: `/usr/lib/`, `/usr/lib/x86_64-linux-gnu/`
-3. Package-specific plugin paths (e.g., `/usr/lib/dde-dock/plugins/`)
-4. Debug files via build-id: `/usr/lib/debug/.build-id/XX/YYYYYY.debug`
-5. If a build-id is available, also try debuginfod
+Reports should show why analysis stopped getting deeper. Durable reason names include:
 
-### Plugin Libraries
-
-DDE plugins live in non-standard paths:
-- `/usr/lib/dde-dock/plugins/*.so`
-- `/usr/lib/dde-control-center/plugins/*.so`
-- `/usr/lib/dde-launcher/plugins/*.so`
-
-These are **not** in standard `LD_LIBRARY_PATH` or dpkg-tracked paths. The resolver has hardcoded search paths for known plugin directories.
-
-### Build-ID Path Format
-
-```
-/usr/lib/debug/.build-id/ab/cdef1234567890abcdef1234567890abcdef1234.debug
-                              ^^ first 2 hex chars  ^^ rest
-```
-
-## 3. Git Blame / Log Analysis
-
-### Applicable Frames
-
-Git analysis runs on frames with status `ok` (full resolution with line number) OR `partial_with_source` (function name matched to source file).
-
-For `partial_with_source` frames, the analyzer must **find the function definition line** within the matched source file. This uses a grep for the function/class-qualified name and returns the first match line number.
-
-### Git Blame Output Format
-
-```
-9fa42306 (chujiaqi@uniontech.com 2025-09-15 14:23:01 +0800 123) PluginListView::rowsInserted(...)
-```
-
-Format: `<commit_hash> (<author> <date> <line_number>) <line_content>`
-
-### Git Log Output
-
-For the blamed commit, `git log -1 --format=...` extracts:
-- Commit hash
-- Author
-- Date
-- Commit message (subject line)
-
-## 4. Objdump Disassembly
-
-### Trigger Condition
-
-Objdump only runs when the original analysis has identified a `key_frame`. Without knowing which frame is the crash point, disassembly is meaningless.
-
-## 7. Frame Window and Deep-Stack Coverage
-
-Enhanced addr2line resolution is no longer hardcoded to the first 20 frames. The frame window is now configurable via `--addr2line-max-frames <n>` and currently defaults to **300** in `analyze_crash_complete.sh` / `analyze_crash_per_version.py`.
-
-Use a higher value when:
-- the meaningful app-layer frame is buried deep under Qt / GLib / signal / event-loop frames
-- the first 20 frames are all wrapper/system frames
-- you are diagnosing crashes with repeated dispatcher / callback nesting
-
-## 8. Partial Resolution Is Still Actionable
-
-On UOS, full file:line resolution often fails because DWARF is corrupted, but `partial_with_source` (function name + source file found by qualified-name search) is still valuable. Treat it as a usable source hit, not as a failed analysis.
-
-Updated behavior:
-- `partial_with_source` now counts as a usable source frame for fixability improvement
-- enhanced analysis should continue root-cause inference when only `partial_with_source` is available
-- do not require `status == ok` exclusively before trying source-based heuristics
-
-## 9. Degradation Reasons Must Be Surfaced
-
-When enhanced analysis cannot go deeper, record **why** instead of silently falling back. Current per-crash degradation reasons include:
 - `no_parsed_frames`
 - `no_addr2line_results`
 - `library_not_found`
@@ -151,90 +86,26 @@ When enhanced analysis cannot go deeper, record **why** instead of silently fall
 - `git_analysis_unavailable`
 - `debuginfod_unavailable`
 - `llm_analysis_unavailable`
+- `deep_dive_exhausted`
+- `deep_dive_no_gain`
 
-Check these fields first when a report looks "shallow".
+Check these first when a report looks shallow.
 
-### Output Format
+## Git / objdump / debuginfod / LLM notes
 
-8 instructions before + the target instruction + 8 instructions after:
+- Run git blame/log on fully resolved `ok` frames and `partial_with_source` frames after locating the likely definition line.
+- Run objdump only when a `key_frame` identifies the likely crash point; otherwise disassembly is noisy.
+- Debuginfod is optional and mostly useful for Debian/Ubuntu/system libraries; UOS package build-ids often 404 on public servers.
+- LLM stack analysis is a late-stage optional aid. It may upgrade fixability only when confidence is high; deterministic evidence remains preferred.
 
-```
-0x00007f8a1b2c3d40:  48 8b 45 f8          mov    -0x8(%rbp),%rax
-0x00007f8a1b2c3d44:  48 89 c7             mov    %rax,%rdi   <- crash at this offset
-0x00007f8a1b2c3d47:  e8 00 00 00 00       call   ...
-```
+## Fixability improvement
 
-## 5. Debuginfod Client
-
-### How It Works
-
-Sends HTTP GET to known debuginfod servers with the build-id:
-
-```
-https://debuginfod.ubuntu.com/buildid/<build-id>/debuginfo
-```
-
-### Known Servers
-
-1. `https://debuginfod.ubuntu.com` — Ubuntu packages
-2. `https://debuginfod.debian.net` — Debian packages
-
-UOS packages have unique build-ids not found on Ubuntu/Debian servers, so debuginfod typically returns 404 for UOS. But it's useful when a crash involves a standard system library.
-
-## 6. LLM Stack Analysis
-
-### When It Runs
-
-LLM stack analysis remains an optional late-stage aid for crashes that still need extra reasoning after the deterministic passes. It is independent from the automatic second-pass deep dive trigger policy. Requires an LLM API key configured in the environment.
-
-### What It Does
-
-Sends the full stack trace to an LLM with a structured prompt asking for:
-1. Root cause classification (null deref, use-after-free, double-free, etc.)
-2. Which frame is most likely the crash point
-3. Suggested fix approach
-4. Confidence level
-
-### Result Integration
-
-If LLM returns high confidence (>0.7), the crash's `fixable` status is upgraded from `uncertain` to a specific pattern.
-
-## Key Environment Constraints
-
-| Tool | Available | Notes |
-|------|-----------|-------|
-| `addr2line` | Yes | Via binutils, handles Chinese locale |
-| `objdump` | Yes | Via binutils |
-| `readelf` | Yes | Via binutils |
-| `eu-addr2line` | No | Not installed (elfutils) |
-| `debuginfod-find` | No | Not installed (elfutils) |
-| `git` | Yes | Required for blame/log |
-| `python3 requests` | Yes | For debuginfod HTTP |
-
-## Stack Frame Parsing
-
-Raw StackInfo format:
-```
-#0 0x7f8a1b2c3d4e symbol_name (libname.so + 0xOFFSET)
-```
-
-Parsing regex extracts:
-- Frame number (`#0`)
-- Address (`0x7f8a1b2c3d4e`)
-- Symbol name (`symbol_name`, may be mangled)
-- Library name (`libname.so`)
-- Offset (`0xOFFSET`)
-
-The offset is used for addr2line: `addr2line -e <binary> -C -f <hex_offset>`
-
-## Automated Fixability Improvement
-
-The enhanced analyzer can upgrade crash fixability assessment:
+Enhanced analysis may upgrade:
 
 | Before | After | Trigger |
 |--------|-------|---------|
-| `uncertain` | `fixable` (null_deref) | Source context shows null pointer access pattern |
-| `uncertain` | `fixable` (use_after_free) | Source context shows dangling pointer usage |
-| `uncertain` | `manual_required` | LLM analysis with low confidence |
+| `uncertain` | `fixable` / `null_deref` | source context shows null pointer access |
+| `uncertain` | `fixable` / `use_after_free` | source context shows dangling pointer use |
+| `uncertain` | `manual_required` | evidence is useful but not safe for automation |
 
-This reduces the number of crashes requiring manual review.
+Do not require full `file:line` resolution before source heuristics. `partial_with_source` is often the best available evidence on UOS.

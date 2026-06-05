@@ -544,6 +544,204 @@ def render_auto_fix_overview_md(overview):
     lines.append("")
     return "\n".join(lines)
 
+
+def markdown_table(headers, rows):
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join(["---"] * len(headers)) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(str(value) for value in row) + " |")
+    return "\n".join(lines)
+
+
+def render_final_analysis_summary_md(manifest, auto_fix_overview, new_crash_overview):
+    """Render the compact human-facing final report for a completed workspace."""
+    packages = manifest.get("packages", [])
+    totals = manifest.get("totals", {})
+    category_counts = auto_fix_overview.get("category_counts", {})
+    auto_entries = auto_fix_overview.get("entries", [])
+
+    status_counts = defaultdict(int)
+    for entry in packages:
+        status_counts[entry.get("status", "unknown")] += 1
+
+    by_unique = sorted(
+        [entry for entry in packages if int(entry.get("unique_crashes", 0) or 0) > 0],
+        key=lambda entry: (-int(entry.get("unique_crashes", 0) or 0), -int(entry.get("valid_records", 0) or 0), entry.get("package", "")),
+    )
+    by_records = sorted(
+        [entry for entry in packages if int(entry.get("valid_records", 0) or 0) > 0],
+        key=lambda entry: (-int(entry.get("valid_records", 0) or 0), -int(entry.get("unique_crashes", 0) or 0), entry.get("package", "")),
+    )
+    partial_packages = [
+        entry for entry in packages
+        if entry.get("status") == "partial"
+        or int(entry.get("analyzed_versions", 0) or 0) < int(entry.get("versions_count", 0) or 0)
+    ]
+    source_problem_packages = [
+        entry for entry in packages
+        if int(entry.get("source_failures", 0) or 0) > 0 or entry.get("status") == "completed_data_only"
+    ]
+
+    code_submitted = [
+        entry for entry in auto_entries
+        if entry.get("category") == "code_fix_submitted" or entry.get("submitted") is True
+    ]
+    manual_required = [
+        entry for entry in auto_entries
+        if entry.get("category") == "manual_required" or int(entry.get("manual_required_count", 0) or 0) > 0
+    ]
+    analysis_report_only = [entry for entry in auto_entries if entry.get("category") == "analysis_report_only"]
+    source_repo_missing = [entry for entry in auto_entries if entry.get("category") == "source_repo_missing"]
+
+    def count_by_package(entries):
+        counts = defaultdict(int)
+        for item in entries:
+            counts[item.get("package", "unknown")] += 1
+        return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+    total_packages = totals.get("packages", len(packages))
+    package_status_line = f"{total_packages}/{total_packages} completed or finalized"
+    if any(entry.get("status") in {"running", "pending"} for entry in packages):
+        package_status_line = f"{sum(1 for entry in packages if entry.get('status') not in {'running', 'pending'})}/{total_packages} finalized"
+
+    lines = [
+        "# Coredump 自动化分析汇总报告",
+        "",
+        f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Workspace: `{manifest.get('workspace', '')}`",
+        f"数据范围: {manifest.get('date_range', '') or '未知'}",
+        f"汇总刷新时间: {manifest.get('generated_at', '')}",
+        "",
+        "## 结论",
+        "",
+        f"- 本轮包级分析状态：{package_status_line}。",
+        f"- 汇总层面：完成 {totals.get('completed', 0)} 个包，部分完成 {totals.get('partial', 0)} 个包，失败 {totals.get('failed', 0)} 个包。",
+        f"- 共处理有效记录 {totals.get('valid_records', 0)} 条，归并出唯一崩溃 {totals.get('unique_crashes', 0)} 个，涉及版本 {totals.get('versions', 0)} 个，已分析版本 {totals.get('analyzed_versions', 0)} 个。",
+        f"- 新增唯一崩溃：{new_crash_overview.get('total_new_unique_crashes', totals.get('new_unique_crashes', 0))} 个；有新增崩溃的包：{new_crash_overview.get('packages_with_new_crashes', totals.get('packages_with_new_crashes', 0))} 个。",
+        f"- Auto-fix：产出结果版本 {auto_fix_overview.get('total_versions_with_auto_fix_results', 0)} 个，其中 fixable/analysis-only/manual-required 输出版本 {auto_fix_overview.get('versions_with_fixable_output', 0)} 个；真实代码修复提交 {category_counts.get('code_fix_submitted', 0)} 个。",
+        "",
+        "## 总体指标",
+        "",
+        markdown_table(["指标", "数值"], [
+            ["包数量", totals.get("packages", 0)],
+            ["包级状态", package_status_line],
+            ["汇总完成包", totals.get("completed", 0)],
+            ["部分完成包", totals.get("partial", 0)],
+            ["失败包", totals.get("failed", 0)],
+            ["有效记录", totals.get("valid_records", 0)],
+            ["唯一崩溃", totals.get("unique_crashes", 0)],
+            ["版本数", totals.get("versions", 0)],
+            ["已分析版本", totals.get("analyzed_versions", 0)],
+            ["新增唯一崩溃", totals.get("new_unique_crashes", 0)],
+        ]),
+        "",
+        "## 包状态分布",
+        "",
+        markdown_table(["状态", "包数"], sorted(status_counts.items())) if status_counts else "无",
+        "",
+        "## 唯一崩溃 Top 包",
+        "",
+        markdown_table(
+            ["包", "有效记录", "唯一崩溃", "版本", "已分析版本", "状态"],
+            [[entry.get("package", ""), entry.get("valid_records", 0), entry.get("unique_crashes", 0), entry.get("versions_count", 0), entry.get("analyzed_versions", 0), entry.get("status", "")] for entry in by_unique[:15]],
+        ) if by_unique else "无",
+        "",
+        "## 有效记录 Top 包",
+        "",
+        markdown_table(
+            ["包", "有效记录", "唯一崩溃", "版本", "已分析版本", "状态"],
+            [[entry.get("package", ""), entry.get("valid_records", 0), entry.get("unique_crashes", 0), entry.get("versions_count", 0), entry.get("analyzed_versions", 0), entry.get("status", "")] for entry in by_records[:15]],
+        ) if by_records else "无",
+        "",
+        "## 部分完成 / 覆盖缺口",
+        "",
+    ]
+
+    if partial_packages:
+        lines.append(markdown_table(
+            ["包", "状态", "版本", "已分析版本", "有效记录", "唯一崩溃"],
+            [[entry.get("package", ""), entry.get("status", ""), entry.get("versions_count", 0), entry.get("analyzed_versions", 0), entry.get("valid_records", 0), entry.get("unique_crashes", 0)] for entry in partial_packages],
+        ))
+        lines.extend(["", "说明：`package_status.tsv` 记录包级执行状态；`run_manifest` 会进一步按版本覆盖率统计 partial。"])
+    else:
+        lines.append("无。")
+
+    lines.extend([
+        "",
+        "## Auto-fix 分类",
+        "",
+        markdown_table(["分类", "版本数"], sorted(category_counts.items())) if category_counts else "无 auto-fix 结果。",
+        "",
+        "### 已提交真实代码修复",
+        "",
+    ])
+    if code_submitted:
+        lines.append(markdown_table(
+            ["包", "版本", "分支", "提交", "结果文件"],
+            [[
+                entry.get("package", ""),
+                entry.get("version", ""),
+                entry.get("branch_name", ""),
+                ", ".join(entry.get("commit_hashes") or ([entry.get("commit_hash")] if entry.get("commit_hash") else [])),
+                entry.get("result_file", ""),
+            ] for entry in code_submitted],
+        ))
+    else:
+        lines.append("无。")
+
+    lines.extend(["", "### 需要人工处理的包", ""])
+    manual_counts = count_by_package(manual_required)
+    lines.append(markdown_table(["包", "manual_required 版本数"], manual_counts) if manual_counts else "无。")
+
+    lines.extend(["", "### Analysis report only 的包", ""])
+    analysis_counts = count_by_package(analysis_report_only)
+    lines.append(markdown_table(["包", "analysis_report_only 版本数"], analysis_counts) if analysis_counts else "无。")
+
+    lines.extend(["", "### 源码缺失", ""])
+    source_missing_counts = count_by_package(source_repo_missing)
+    lines.append(markdown_table(["包", "source_repo_missing 版本数"], source_missing_counts) if source_missing_counts else "无。")
+
+    lines.extend(["", "## 源码/数据问题包", ""])
+    if source_problem_packages:
+        lines.append(markdown_table(
+            ["包", "状态", "源码失败", "有效记录", "唯一崩溃"],
+            [[entry.get("package", ""), entry.get("status", ""), entry.get("source_failures", 0), entry.get("valid_records", 0), entry.get("unique_crashes", 0)] for entry in source_problem_packages],
+        ))
+    else:
+        lines.append("无。")
+
+    lines.extend([
+        "",
+        "## 建议后续动作",
+        "",
+        "1. 优先核查已提交的真实代码修复，确认 Gerrit review 与源码改动是否符合预期。",
+        "2. 对 manual_required 集中的包做专项人工分析；如存在 partial 包，同时补齐版本覆盖缺口。",
+        "3. 对 source_repo_missing / completed_data_only 的包补齐源码映射或分支信息后重跑对应包/版本。",
+        "4. analysis_report_only 不计为真实修复，除非明确需要保留分析记录，否则不要当作代码修复提交统计。",
+        "",
+        "## 相关原始文件",
+        "",
+    ])
+    summary_dir = Path(manifest.get("summary_dir") or (Path(manifest.get("workspace", ".")) / SUMMARY_DIR_NAME))
+    for name in [
+        "run_manifest.md",
+        "run_manifest.json",
+        "auto_fix_overview.md",
+        "auto_fix_overview.json",
+        "new_crashes_overview.md",
+        "new_crashes_overview.json",
+        "package_status.tsv",
+        "version_status.tsv",
+    ]:
+        path = summary_dir / name
+        if path.exists():
+            lines.append(f"- `{path}`")
+
+    lines.append("")
+    return "\n".join(lines)
+
 def clean_version_label(value):
     value = (value or "").strip()
     if not value:
@@ -1076,6 +1274,10 @@ def main():
     auto_fix_overview = collect_auto_fix_overview(workspace, packages)
     write_json(summary_dir / "auto_fix_overview.json", auto_fix_overview)
     (summary_dir / "auto_fix_overview.md").write_text(render_auto_fix_overview_md(auto_fix_overview), encoding="utf-8")
+    (summary_dir / "analysis_summary_final.md").write_text(
+        render_final_analysis_summary_md(manifest, auto_fix_overview, new_crash_overview),
+        encoding="utf-8",
+    )
     write_retry_packages(summary_dir / "retry_packages.txt", retry_packages)
     write_json(summary_dir / "retry_versions.json", retry_versions)
     write_retry_versions_tsv(summary_dir / "retry_versions.tsv", retry_versions)
@@ -1089,6 +1291,7 @@ def main():
     print(f"✅ all_packages_summary.md 已生成: {summary_dir / 'all_packages_summary.md'}")
     print(f"✅ root_cause_clusters.md 已生成: {summary_dir / 'root_cause_clusters.md'}")
     print(f"✅ auto_fix_overview.md 已生成: {summary_dir / 'auto_fix_overview.md'}")
+    print(f"✅ analysis_summary_final.md 已生成: {summary_dir / 'analysis_summary_final.md'}")
     print(f"✅ retry_packages.txt 已生成: {summary_dir / 'retry_packages.txt'}")
     print(f"✅ retry_versions.md 已生成: {summary_dir / 'retry_versions.md'}")
     print(f"✅ retry_versions.sh 已生成: {summary_dir / 'retry_versions.sh'}")

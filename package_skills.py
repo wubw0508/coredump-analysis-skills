@@ -23,10 +23,34 @@ from pathlib import Path
 from typing import Optional
 
 
-# Patterns to exclude when packaging skills
-EXCLUDE_DIRS = {"__pycache__", "node_modules", ".git", ".claude"}
-EXCLUDE_GLOBS = {"*.pyc", "*.pyo", "*.db", "*.sqlite"}
-EXCLUDE_FILES = {".DS_Store", "accounts.json", "*.log", "download.log"}
+# Patterns to exclude when packaging skills.
+# Keep this conservative: exclude generated caches, local tool/editor state,
+# runtime workspaces/logs, credentials, and generated package artifacts, but not
+# source files or reusable project documentation.
+EXCLUDE_DIRS = {
+    "__pycache__",
+    "node_modules",
+    ".git",
+    ".claude",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "htmlcov",
+    "dist",
+    "build",
+}
+EXCLUDE_GLOBS = {
+    "*.pyc",
+    "*.pyo",
+    "*.db",
+    "*.sqlite",
+    "*.log",
+    "*.tmp",
+    "*.bak",
+    "*.skill",
+    "coredump-workspace-*",
+}
+EXCLUDE_FILES = {".DS_Store", ".coverage", "accounts.json", "download.log"}
 
 # Skill directories to package
 COREDUMP_SKILLS = [
@@ -50,6 +74,8 @@ def should_exclude(rel_path: Path) -> bool:
     """Check if a path should be excluded from packaging."""
     parts = rel_path.parts
     if any(part in EXCLUDE_DIRS for part in parts):
+        return True
+    if any(fnmatch.fnmatch(part, pat) for part in parts for pat in EXCLUDE_GLOBS):
         return True
     name = rel_path.name
     if name in EXCLUDE_FILES:
