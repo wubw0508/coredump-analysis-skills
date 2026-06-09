@@ -23,6 +23,7 @@ generate_workspace_with_timestamp() {
 
 # 默认值
 PACKAGES=""
+PARSED_PACKAGES=""
 START_DATE=""
 END_DATE=""
 SYS_VERSION="1070-1075"
@@ -400,6 +401,7 @@ parse_packages_file() {
             fi
         done
     done < "$file"
+    PARSED_PACKAGES="$packages"
     echo "$packages"
 }
 
@@ -433,7 +435,8 @@ load_default_packages_if_needed() {
     fi
 
     echo -e "${YELLOW}未指定 --packages，从 $PACKAGES_FILE 读取默认项目列表${NC}"
-    PACKAGES=$(parse_packages_file "$PACKAGES_FILE")
+    parse_packages_file "$PACKAGES_FILE" >/dev/null
+    PACKAGES="$PARSED_PACKAGES"
     if [[ -z "$PACKAGES" ]]; then
         echo -e "${RED}错误: packages.txt 为空${NC}"
         exit 1

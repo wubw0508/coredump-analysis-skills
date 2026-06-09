@@ -121,6 +121,35 @@ class PackagesFileParsingTests(unittest.TestCase):
         self.assertIn('PROJECT_go=go-lib', result.stdout)
         self.assertIn('PROJECT_network=dde-network-core', result.stdout)
 
+    def test_default_packages_load_preserves_project_download_mappings(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            packages_file = tmp_path / 'packages.txt'
+            packages_file.write_text(textwrap.dedent('''\
+                dde-network-core:dcc-network-plugin,deepin-service-plugin-network,dock-network-plugin
+                deepin-authentication:deepin-authenticate,libdeepin-authenticate
+            '''), encoding='utf-8')
+            script_copy = tmp_path / 'run_analysis_agent.sh'
+            script_copy.write_text(script_without_runtime_validation(), encoding='utf-8')
+            cmd = textwrap.dedent(f'''\
+                set -euo pipefail
+                source {script_copy}
+                PACKAGES_FILE={packages_file}
+                load_default_packages_if_needed >/dev/null
+                printf 'PACKAGES=%s\n' "$PACKAGES"
+                printf 'DOWNLOAD_NETWORK=%s\n' "$(get_package_data_download_name deepin-service-plugin-network)"
+                printf 'PROJECT_NETWORK=%s\n' "$(get_package_project deepin-service-plugin-network)"
+                printf 'DOWNLOAD_AUTH=%s\n' "$(get_package_data_download_name libdeepin-authenticate)"
+                printf 'PROJECT_AUTH=%s\n' "$(get_package_project libdeepin-authenticate)"
+            ''')
+            result = subprocess.run(['bash', '-c', cmd], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+
+        self.assertIn('PACKAGES=dcc-network-plugin,deepin-service-plugin-network,dock-network-plugin,deepin-authenticate,libdeepin-authenticate', result.stdout)
+        self.assertIn('DOWNLOAD_NETWORK=dde-network-core', result.stdout)
+        self.assertIn('PROJECT_NETWORK=dde-network-core', result.stdout)
+        self.assertIn('DOWNLOAD_AUTH=deepin-authentication', result.stdout)
+        self.assertIn('PROJECT_AUTH=deepin-authentication', result.stdout)
+
     def test_parse_packages_file_ignores_blank_and_comment_lines(self):
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
